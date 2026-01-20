@@ -6,7 +6,7 @@ module Txcontext
                 :provider, :model, :concurrency, :context_lines,
                 :max_matches_per_key, :output_path, :output_format,
                 :no_cache, :dry_run, :key_filter, :custom_prompt, :write_back,
-                :swift_functions, :write_back_to_code
+                :swift_functions, :write_back_to_code, :diff_base
 
     def initialize(**attrs)
       @translations = attrs[:translations] || []
@@ -26,6 +26,7 @@ module Txcontext
       @write_back = attrs[:write_back] || false
       @write_back_to_code = attrs[:write_back_to_code] || false
       @swift_functions = attrs[:swift_functions] || default_swift_functions
+      @diff_base = attrs[:diff_base]
     end
 
     def default_swift_functions
@@ -89,7 +90,8 @@ module Txcontext
         dry_run: options[:dry_run] || false,
         key_filter: options[:keys],
         write_back: options[:write_back] || false,
-        write_back_to_code: options[:write_back_to_code] || false
+        write_back_to_code: options[:write_back_to_code] || false,
+        diff_base: options[:diff_base]
       )
     end
 
@@ -103,6 +105,7 @@ module Txcontext
       @concurrency = options[:concurrency] if options[:concurrency]
       @write_back = options[:write_back] if options[:write_back]
       @write_back_to_code = options[:write_back_to_code] if options[:write_back_to_code]
+      @diff_base = options[:diff_base] if options[:diff_base]
       self
     end
 

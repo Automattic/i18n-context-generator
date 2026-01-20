@@ -38,13 +38,19 @@ module Txcontext
     def run
       entries = load_translations
       entries = filter_entries(entries) if @config.key_filter
+      entries = filter_by_diff(entries) if @config.diff_base
 
       if entries.empty?
-        puts "No translation entries found."
+        if @config.diff_base
+          puts "No changed translation keys found since #{@config.diff_base}."
+        else
+          puts "No translation entries found."
+        end
         return
       end
 
       puts "Loaded #{entries.size} translation keys"
+      puts "(filtered to changes since #{@config.diff_base})" if @config.diff_base
 
       if @config.dry_run
         puts "\nDry run - would process these keys:"
@@ -106,6 +112,20 @@ module Txcontext
       entries.select do |entry|
         patterns.any? { |p| entry.key.match?(p) }
       end
+    end
+
+    def filter_by_diff(entries)
+      git_diff = GitDiff.new(base_ref: @config.diff_base)
+      changed_keys = git_diff.changed_keys(@config.translations)
+
+      if changed_keys.empty?
+        puts "No changes detected in translation files since #{@config.diff_base}"
+        return []
+      end
+
+      puts "Found #{changed_keys.size} changed keys in git diff"
+
+      entries.select { |entry| changed_keys.include?(entry.key) }
     end
 
     def process_entries(entries)

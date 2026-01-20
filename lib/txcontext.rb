@@ -29,6 +29,7 @@ require_relative "txcontext/writers/strings_writer"
 require_relative "txcontext/writers/android_xml_writer"
 require_relative "txcontext/writers/swift_writer"
 require_relative "txcontext/cache"
+require_relative "txcontext/git_diff"
 require_relative "txcontext/context_extractor"
 
 module Txcontext

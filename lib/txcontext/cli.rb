@@ -40,10 +40,12 @@ module Txcontext
     option :no_cache, type: :boolean, default: false, desc: "Disable caching"
     option :write_back, type: :boolean, default: false, desc: "Write context back to source translation files (.strings, strings.xml)"
     option :write_back_to_code, type: :boolean, default: false, desc: "Write context back to Swift source code comment: parameters"
+    option :diff_base, type: :string, desc: "Only process keys changed since this git ref (e.g., main, origin/main)"
 
     def extract
       validate_options!
       validate_api_key!
+      validate_diff_base! if options[:diff_base]
 
       config = Config.load(options)
       extractor = ContextExtractor.new(config)
@@ -104,6 +106,20 @@ module Txcontext
       say_error "Error: #{env_var} environment variable is required for provider '#{provider}'"
       say_error "Set it with: export #{env_var}=your-api-key"
       exit 1
+    end
+
+    def validate_diff_base!
+      unless GitDiff.available?
+        say_error "Error: --diff-base requires a git repository"
+        exit 1
+      end
+
+      git_diff = GitDiff.new(base_ref: options[:diff_base])
+      unless git_diff.base_ref_exists?
+        say_error "Error: git ref '#{options[:diff_base]}' not found"
+        say_error "Try: origin/main, main, or a specific commit SHA"
+        exit 1
+      end
     end
 
     def say_error(message)
