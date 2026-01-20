@@ -3,63 +3,59 @@
 module Txcontext
   module Writers
     # Writer that updates iOS .strings files with context comments
-    # Adds or updates comments before each string entry
+    # Uses the dotstrings gem for proper parsing and generation
     class StringsWriter
+      CONTEXT_PREFIX = "Context: "
+
       def write(results, source_path)
         return unless File.exist?(source_path)
 
-        content = File.read(source_path, encoding: "UTF-8")
+        # Parse the existing file
+        original_file = DotStrings.parse_file(source_path, strict: false)
         results_by_key = results.to_h { |r| [r.key, r] }
 
-        updated_content = update_content(content, results_by_key)
+        # Build new file with updated comments (DotStrings::Item is immutable)
+        new_file = DotStrings::File.new
 
-        File.write(source_path, updated_content)
+        original_file.items.each do |item|
+          result = results_by_key[item.key]
+
+          new_comment = if result&.description && !skip_description?(result.description)
+                          build_comment(item.comment, result.description)
+                        else
+                          item.comment
+                        end
+
+          new_item = DotStrings::Item.new(
+            key: item.key,
+            value: item.value,
+            comment: new_comment
+          )
+          new_file << new_item
+        end
+
+        # Write back to file
+        File.write(source_path, new_file.to_s)
       end
 
       private
 
-      def update_content(content, results_by_key)
-        lines = content.lines
-        output_lines = []
-        i = 0
-
-        while i < lines.length
-          line = lines[i]
-
-          # Check if this is a string entry
-          if (match = line.match(/^\s*"([^"]+)"\s*=\s*"(.*)"\s*;\s*$/))
-            key = match[1]
-
-            if results_by_key[key] && results_by_key[key].description
-              description = results_by_key[key].description
-
-              # Skip "No usage found" or error descriptions
-              unless description.include?("No usage found") || description.include?("Processing failed")
-                # Check if previous line is already a context comment (to replace it)
-                if output_lines.any? && output_lines.last.match?(%r{^\s*/\*.*\*/\s*$})
-                  # Check if it's a context comment (not a section header or other comment)
-                  prev_comment = output_lines.last
-                  if prev_comment.include?("Context:") || !prev_comment.match?(/^\/\*\s*(MARK|TODO|FIXME|#pragma)/)
-                    output_lines.pop # Remove old context comment
-                  end
-                end
-
-                # Add new context comment
-                output_lines << "/* Context: #{escape_comment(description)} */\n"
-              end
-            end
-          end
-
-          output_lines << line
-          i += 1
-        end
-
-        output_lines.join
+      def skip_description?(description)
+        description.include?("No usage found") || description.include?("Processing failed")
       end
 
-      def escape_comment(text)
-        # Remove any existing comment markers and newlines
-        text.gsub("*/", "* /").gsub("/*", "/ *").gsub("\n", " ").strip
+      def build_comment(existing_comment, context_description)
+        context_line = "#{CONTEXT_PREFIX}#{context_description}"
+
+        if existing_comment.nil? || existing_comment.empty?
+          context_line
+        elsif existing_comment.include?(CONTEXT_PREFIX)
+          # Replace existing context line
+          existing_comment.gsub(/#{Regexp.escape(CONTEXT_PREFIX)}[^\n]*/, context_line)
+        else
+          # Append context to existing comment
+          "#{existing_comment}\n#{context_line}"
+        end
       end
     end
   end

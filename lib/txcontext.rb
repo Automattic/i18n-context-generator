@@ -11,6 +11,7 @@ require "oj"
 require "httpx"
 require "concurrent"
 require "tty-progressbar"
+require "dotstrings"
 
 require_relative "txcontext/version"
 require_relative "txcontext/config"

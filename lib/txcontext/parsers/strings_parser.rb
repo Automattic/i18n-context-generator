@@ -3,56 +3,25 @@
 module Txcontext
   module Parsers
     # Parser for Apple .strings files (iOS/macOS)
-    # Format: "key" = "value";
-    # With optional comment: /* comment */ "key" = "value";
+    # Uses the dotstrings gem for proper parsing with support for:
+    # - Multi-line comments
+    # - Unicode and escaped characters
+    # - Proper error handling
     class StringsParser < Base
-      # Match: "key" = "value";
-      # Captures: key, value
-      STRING_PATTERN = /^\s*"([^"]+)"\s*=\s*"(.*)"\s*;\s*$/
-
-      # Match: /* comment */
-      COMMENT_PATTERN = %r{/\*\s*(.*?)\s*\*/}m
-
       def parse(path)
-        content = File.read(path, encoding: "UTF-8")
-        entries = []
-        current_comment = nil
+        # Use non-strict mode to be lenient with edge cases
+        strings_file = DotStrings.parse_file(path, strict: false)
 
-        content.each_line do |line|
-          # Check for comment
-          if (comment_match = line.match(COMMENT_PATTERN))
-            current_comment = comment_match[1].strip
-          end
-
-          # Check for string entry
-          if (string_match = line.match(STRING_PATTERN))
-            key = string_match[1]
-            text = unescape_string(string_match[2])
-
-            entries << TranslationEntry.new(
-              key: key,
-              text: text,
-              source_file: path,
-              metadata: { comment: current_comment }
-            )
-
-            # Reset comment after using it
-            current_comment = nil
-          end
+        strings_file.items.map do |item|
+          TranslationEntry.new(
+            key: item.key,
+            text: item.value,
+            source_file: path,
+            metadata: { comment: item.comment }
+          )
         end
-
-        entries
-      end
-
-      private
-
-      # Unescape common escape sequences in .strings files
-      def unescape_string(str)
-        str
-          .gsub('\\"', '"')
-          .gsub("\\n", "\n")
-          .gsub("\\t", "\t")
-          .gsub("\\\\", "\\")
+      rescue DotStrings::ParsingError => e
+        raise Error, "Failed to parse .strings file #{path}: #{e.message}"
       end
     end
   end

@@ -1,81 +1,106 @@
 # frozen_string_literal: true
 
 require "rexml/document"
-require "rexml/formatters/pretty"
 
 module Txcontext
   module Writers
     # Writer that updates Android strings.xml files with context comments
-    # Adds or updates comments before each string entry
+    # Uses REXML for proper XML manipulation
     class AndroidXmlWriter
+      CONTEXT_PREFIX = "Context: "
+
       def write(results, source_path)
         return unless File.exist?(source_path)
 
         content = File.read(source_path, encoding: "UTF-8")
+        doc = REXML::Document.new(content)
         results_by_key = results.to_h { |r| [r.key, r] }
 
-        updated_content = update_content(content, results_by_key)
+        # Process each string element
+        doc.elements.each("resources/string") do |element|
+          key = element.attributes["name"]
+          result = results_by_key[key]
 
-        File.write(source_path, updated_content)
+          next unless result&.description
+          next if skip_description?(result.description)
+
+          update_element_comment(element, result.description)
+        end
+
+        # Write back with preserved formatting
+        output = String.new
+        formatter = REXML::Formatters::Pretty.new(4)
+        formatter.compact = true
+        formatter.write(doc, output)
+
+        # Fix common formatting issues
+        output = fix_formatting(output, content)
+
+        File.write(source_path, output)
       end
 
       private
 
-      def update_content(content, results_by_key)
-        # Use line-based processing to preserve formatting
-        lines = content.lines
-        output_lines = []
-        i = 0
-
-        while i < lines.length
-          line = lines[i]
-
-          # Check if this is a string element
-          if (match = line.match(/<string\s+name="([^"]+)"[^>]*>/))
-            key = match[1]
-
-            if results_by_key[key] && results_by_key[key].description
-              description = results_by_key[key].description
-
-              # Skip "No usage found" or error descriptions
-              unless description.include?("No usage found") || description.include?("Processing failed")
-                # Check if previous non-empty line is already a context comment
-                prev_index = output_lines.length - 1
-                while prev_index >= 0 && output_lines[prev_index].strip.empty?
-                  prev_index -= 1
-                end
-
-                if prev_index >= 0 && output_lines[prev_index].match?(/^\s*<!--.*-->\s*$/)
-                  prev_comment = output_lines[prev_index]
-                  # Replace if it's a context comment
-                  if prev_comment.include?("Context:")
-                    output_lines[prev_index] = "#{indent(line)}<!-- Context: #{escape_comment(description)} -->\n"
-                  else
-                    # Add new context comment before the string
-                    output_lines << "#{indent(line)}<!-- Context: #{escape_comment(description)} -->\n"
-                  end
-                else
-                  # Add new context comment
-                  output_lines << "#{indent(line)}<!-- Context: #{escape_comment(description)} -->\n"
-                end
-              end
-            end
-          end
-
-          output_lines << line
-          i += 1
-        end
-
-        output_lines.join
+      def skip_description?(description)
+        description.include?("No usage found") || description.include?("Processing failed")
       end
 
-      def indent(line)
-        line.match(/^(\s*)/)[1] || ""
+      def update_element_comment(element, description)
+        context_text = "#{CONTEXT_PREFIX}#{escape_comment(description)}"
+
+        # Find existing context comment to update, or insert new one
+        prev_sibling = element.previous_sibling
+
+        # Skip whitespace text nodes
+        while prev_sibling.is_a?(REXML::Text) && prev_sibling.to_s.strip.empty?
+          prev_sibling = prev_sibling.previous_sibling
+        end
+
+        if prev_sibling.is_a?(REXML::Comment)
+          comment_text = prev_sibling.to_s.strip
+          if comment_text.start_with?(CONTEXT_PREFIX)
+            # Update existing context comment
+            prev_sibling.string = " #{context_text} "
+          else
+            # Insert new context comment before the element
+            insert_comment_before(element, context_text)
+          end
+        else
+          # Insert new context comment before the element
+          insert_comment_before(element, context_text)
+        end
+      end
+
+      def insert_comment_before(element, text)
+        parent = element.parent
+        index = parent.index(element)
+
+        # Create comment node
+        comment = REXML::Comment.new(" #{text} ")
+
+        # Insert comment and a newline before the element
+        parent.insert_before(element, comment)
       end
 
       def escape_comment(text)
         # Remove any existing comment markers and newlines
-        text.gsub("-->", "- ->").gsub("<!--", "<!- -").gsub("\n", " ").strip
+        text
+          .gsub("--", "- -") # Double dash not allowed in XML comments
+          .gsub("\n", " ")
+          .strip
+      end
+
+      def fix_formatting(output, original_content)
+        # Preserve original XML declaration style if present
+        if original_content.start_with?("<?xml")
+          original_decl = original_content.match(/^<\?xml[^?]*\?>/)[0]
+          output = output.sub(/^<\?xml[^?]*\?>/, original_decl)
+        end
+
+        # Ensure file ends with newline
+        output = "#{output.rstrip}\n"
+
+        output
       end
     end
   end
