@@ -38,7 +38,8 @@ module Txcontext
     option :concurrency, type: :numeric, default: 5, desc: "Number of concurrent requests"
     option :dry_run, type: :boolean, default: false, desc: "Show what would be processed without calling LLM"
     option :no_cache, type: :boolean, default: false, desc: "Disable caching"
-    option :write_back, type: :boolean, default: false, desc: "Write context back to source translation files as comments"
+    option :write_back, type: :boolean, default: false, desc: "Write context back to source translation files (.strings, strings.xml)"
+    option :write_back_to_code, type: :boolean, default: false, desc: "Write context back to Swift source code comment: parameters"
 
     def extract
       validate_options!
@@ -150,8 +151,20 @@ module Txcontext
         output:
           format: csv
           path: translation-context.csv
-          # Set to true to write context comments back to translation files
+          # Set to true to write context comments back to translation files (.strings, strings.xml)
           write_back: false
+          # Set to true to write context back to Swift source code comment: parameters
+          write_back_to_code: false
+
+        # Swift-specific configuration for write_back_to_code
+        swift:
+          # Localization functions to update (default shown)
+          functions:
+            - NSLocalizedString
+            - "String(localized:"
+            - "Text("
+            # Add custom functions like:
+            # - "MyLocalizedString("
       YAML
     end
   end

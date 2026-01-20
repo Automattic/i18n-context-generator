@@ -36,3 +36,8 @@
 "post.share" = "Share";
 "post.like" = "Like";
 "post.comments" = "%d comments";
+
+/* Quick Start */
+"quickstart.title" = "Quick Start";
+"quickstart.header" = "Get Started";
+"quickstart.markComplete" = "Mark All Complete";

@@ -5,7 +5,8 @@ module Txcontext
     attr_reader :translations, :source_paths, :ignore_patterns,
                 :provider, :model, :concurrency, :context_lines,
                 :max_matches_per_key, :output_path, :output_format,
-                :no_cache, :dry_run, :key_filter, :custom_prompt, :write_back
+                :no_cache, :dry_run, :key_filter, :custom_prompt, :write_back,
+                :swift_functions, :write_back_to_code
 
     def initialize(**attrs)
       @translations = attrs[:translations] || []
@@ -23,6 +24,12 @@ module Txcontext
       @key_filter = attrs[:key_filter]
       @custom_prompt = attrs[:custom_prompt]
       @write_back = attrs[:write_back] || false
+      @write_back_to_code = attrs[:write_back_to_code] || false
+      @swift_functions = attrs[:swift_functions] || default_swift_functions
+    end
+
+    def default_swift_functions
+      %w[NSLocalizedString String(localized: Text(]
     end
 
     def self.load(options)
@@ -48,6 +55,8 @@ module Txcontext
         output_path: yaml.dig("output", "path") || "translation-context.csv",
         output_format: yaml.dig("output", "format") || "csv",
         write_back: yaml.dig("output", "write_back") || false,
+        write_back_to_code: yaml.dig("output", "write_back_to_code") || false,
+        swift_functions: yaml.dig("swift", "functions"),
         custom_prompt: yaml["prompt"]
       )
     end
@@ -79,7 +88,8 @@ module Txcontext
         no_cache: options[:no_cache] || false,
         dry_run: options[:dry_run] || false,
         key_filter: options[:keys],
-        write_back: options[:write_back] || false
+        write_back: options[:write_back] || false,
+        write_back_to_code: options[:write_back_to_code] || false
       )
     end
 
@@ -92,6 +102,7 @@ module Txcontext
       @model = options[:model] if options[:model]
       @concurrency = options[:concurrency] if options[:concurrency]
       @write_back = options[:write_back] if options[:write_back]
+      @write_back_to_code = options[:write_back_to_code] if options[:write_back_to_code]
       self
     end
 

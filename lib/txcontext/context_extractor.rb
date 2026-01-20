@@ -60,6 +60,10 @@ module Txcontext
         write_back_to_source
       end
 
+      if @config.write_back_to_code
+        write_back_to_code
+      end
+
       puts "\nWrote #{@results.size} results to #{@config.output_path}"
       puts "Errors: #{@errors.size}" if @errors.any?
     end
@@ -209,6 +213,36 @@ module Txcontext
 
         writer.write(@results, path)
         puts "Updated #{path} with context comments"
+      end
+    end
+
+    def write_back_to_code
+      swift_writer = Writers::SwiftWriter.new(functions: @config.swift_functions)
+
+      updated_count = 0
+      results_by_key = @results.to_h { |r| [r.key, r] }
+
+      @config.source_paths.each do |source_path|
+        swift_files = find_swift_files(source_path)
+
+        swift_files.each do |swift_file|
+          if swift_writer.update_file(swift_file, results_by_key)
+            updated_count += 1
+            puts "Updated #{swift_file} with context comments"
+          end
+        end
+      end
+
+      puts "Updated #{updated_count} Swift files with context comments" if updated_count > 0
+    end
+
+    def find_swift_files(path)
+      if File.file?(path) && path.end_with?(".swift")
+        [path]
+      elsif File.directory?(path)
+        Dir.glob(File.join(path, "**", "*.swift"))
+      else
+        []
       end
     end
 
