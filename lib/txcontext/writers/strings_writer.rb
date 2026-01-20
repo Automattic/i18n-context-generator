@@ -5,7 +5,10 @@ module Txcontext
     # Writer that updates iOS .strings files with context comments
     # Uses the dotstrings gem for proper parsing and generation
     class StringsWriter
-      CONTEXT_PREFIX = "Context: "
+      def initialize(context_prefix: "Context: ", context_mode: "replace")
+        @context_prefix = context_prefix
+        @context_mode = context_mode
+      end
 
       def write(results, source_path)
         return unless File.exist?(source_path)
@@ -45,13 +48,16 @@ module Txcontext
       end
 
       def build_comment(existing_comment, context_description)
-        context_line = "#{CONTEXT_PREFIX}#{context_description}"
+        context_line = "#{@context_prefix}#{context_description}"
 
         if existing_comment.nil? || existing_comment.empty?
           context_line
-        elsif existing_comment.include?(CONTEXT_PREFIX)
-          # Replace existing context line
-          existing_comment.gsub(/#{Regexp.escape(CONTEXT_PREFIX)}[^\n]*/, context_line)
+        elsif @context_mode == "replace"
+          # Replace entire comment with new context
+          context_line
+        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
+          # Replace existing context line (idempotent update)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
         else
           # Append context to existing comment
           "#{existing_comment}\n#{context_line}"

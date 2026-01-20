@@ -13,10 +13,10 @@ module Txcontext
         Text(
       ].freeze
 
-      CONTEXT_PREFIX = "Context: "
-
-      def initialize(functions: nil)
+      def initialize(functions: nil, context_prefix: "Context: ", context_mode: "replace")
         @functions = functions || DEFAULT_FUNCTIONS
+        @context_prefix = context_prefix
+        @context_mode = context_mode
       end
 
       # Write context back to all Swift files that contain the keys
@@ -82,7 +82,6 @@ module Txcontext
       # Update comment for a specific key in the content
       def update_comment_for_key(content, key, description)
         escaped_key = Regexp.escape(key)
-        new_comment = build_comment(description)
 
         @functions.each do |func|
           # Build pattern based on function type
@@ -91,7 +90,7 @@ module Txcontext
 
           # Try to match and replace
           content = content.gsub(pattern) do |match|
-            update_match(match, func, key, new_comment)
+            update_match(match, func, key, description)
           end
         end
 
@@ -121,16 +120,28 @@ module Txcontext
 
       def update_match(match, func, key, new_comment)
         # Replace the comment value while preserving the rest of the call
-        match.gsub(/comment:\s*"[^"]*"/) do
-          "comment: \"#{escape_swift_string(new_comment)}\""
+        match.gsub(/comment:\s*"([^"]*)"/) do |comment_match|
+          existing_comment = Regexp.last_match(1)
+          final_comment = build_final_comment(existing_comment, new_comment)
+          "comment: \"#{escape_swift_string(final_comment)}\""
         end
       end
 
-      def build_comment(description)
-        # If description already has context prefix, use as-is
-        return description if description.start_with?(CONTEXT_PREFIX)
+      def build_final_comment(existing_comment, new_context)
+        context_line = "#{@context_prefix}#{new_context}"
 
-        "#{CONTEXT_PREFIX}#{description}"
+        if existing_comment.nil? || existing_comment.empty?
+          context_line
+        elsif @context_mode == "replace"
+          # Replace entire comment
+          context_line
+        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
+          # Update existing context line (idempotent)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
+        else
+          # Append context to existing comment
+          "#{existing_comment} #{context_line}"
+        end
       end
 
       def escape_swift_string(str)

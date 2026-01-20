@@ -41,6 +41,8 @@ module Txcontext
     option :write_back, type: :boolean, default: false, desc: "Write context back to source translation files (.strings, strings.xml)"
     option :write_back_to_code, type: :boolean, default: false, desc: "Write context back to Swift source code comment: parameters"
     option :diff_base, type: :string, desc: "Only process keys changed since this git ref (e.g., main, origin/main)"
+    option :context_prefix, type: :string, default: "Context: ", desc: "Prefix for context comments (use empty string for no prefix)"
+    option :context_mode, type: :string, default: "replace", enum: %w[replace append], desc: "How to handle existing comments: replace or append"
 
     def extract
       validate_options!
@@ -171,6 +173,10 @@ module Txcontext
           write_back: false
           # Set to true to write context back to Swift source code comment: parameters
           write_back_to_code: false
+          # Prefix for context comments (use empty string for no prefix)
+          # context_prefix: "Context: "
+          # How to handle existing comments: "replace" or "append"
+          # context_mode: replace
 
         # Swift-specific configuration for write_back_to_code
         swift:

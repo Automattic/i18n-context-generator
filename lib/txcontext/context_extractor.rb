@@ -237,7 +237,11 @@ module Txcontext
     end
 
     def write_back_to_code
-      swift_writer = Writers::SwiftWriter.new(functions: @config.swift_functions)
+      swift_writer = Writers::SwiftWriter.new(
+        functions: @config.swift_functions,
+        context_prefix: @config.context_prefix,
+        context_mode: @config.context_mode
+      )
 
       updated_count = 0
       results_by_key = @results.to_h { |r| [r.key, r] }
@@ -272,9 +276,17 @@ module Txcontext
 
       case ext
       when ".strings"
-        Writers::StringsWriter.new
+        Writers::StringsWriter.new(
+          context_prefix: @config.context_prefix,
+          context_mode: @config.context_mode
+        )
       when ".xml"
-        Writers::AndroidXmlWriter.new if basename == "strings.xml" || path.include?("/res/values")
+        if basename == "strings.xml" || path.include?("/res/values")
+          Writers::AndroidXmlWriter.new(
+            context_prefix: @config.context_prefix,
+            context_mode: @config.context_mode
+          )
+        end
       else
         nil # No write-back support for other formats
       end

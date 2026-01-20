@@ -7,7 +7,10 @@ module Txcontext
     # Writer that updates Android strings.xml files with context comments
     # Uses REXML for proper XML manipulation
     class AndroidXmlWriter
-      CONTEXT_PREFIX = "Context: "
+      def initialize(context_prefix: "Context: ", context_mode: "replace")
+        @context_prefix = context_prefix
+        @context_mode = context_mode
+      end
 
       def write(results, source_path)
         return unless File.exist?(source_path)
@@ -46,9 +49,9 @@ module Txcontext
       end
 
       def update_element_comment(element, description)
-        context_text = "#{CONTEXT_PREFIX}#{escape_comment(description)}"
+        context_text = "#{@context_prefix}#{escape_comment(description)}"
 
-        # Find existing context comment to update, or insert new one
+        # Find existing comment before this element
         prev_sibling = element.previous_sibling
 
         # Skip whitespace text nodes
@@ -57,13 +60,17 @@ module Txcontext
         end
 
         if prev_sibling.is_a?(REXML::Comment)
-          comment_text = prev_sibling.to_s.strip
-          if comment_text.start_with?(CONTEXT_PREFIX)
-            # Update existing context comment
+          existing_text = prev_sibling.to_s.strip
+
+          if @context_mode == "replace"
+            # Replace entire comment
+            prev_sibling.string = " #{context_text} "
+          elsif !@context_prefix.empty? && existing_text.start_with?(@context_prefix)
+            # Update existing context line (idempotent)
             prev_sibling.string = " #{context_text} "
           else
-            # Insert new context comment before the element
-            insert_comment_before(element, context_text)
+            # Append to existing comment
+            prev_sibling.string = " #{existing_text} #{context_text} "
           end
         else
           # Insert new context comment before the element

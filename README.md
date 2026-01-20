@@ -71,7 +71,11 @@ bundle exec exe/txcontext extract \
     --concurrency N        Number of concurrent requests (default: 5)
     --dry-run              Show what would be processed without calling LLM
     --no-cache             Disable caching
-    --write-back           Write context back to source translation files as comments
+    --write-back           Write context back to source translation files (.strings, strings.xml)
+    --write-back-to-code   Write context back to Swift source code comment: parameters
+    --diff-base REF        Only process keys changed since this git ref (e.g., main, origin/main)
+    --context-prefix TEXT  Prefix for context comments (default: "Context: ", use "" for none)
+    --context-mode MODE    How to handle existing comments: replace or append (default: replace)
 ```
 
 ### Using a Config File
@@ -120,7 +124,17 @@ processing:
 output:
   format: csv
   path: translation-context.csv
-  write_back: false
+  write_back: false            # Write to .strings / strings.xml
+  write_back_to_code: false    # Write to Swift comment: parameters
+  context_prefix: "Context: "  # Prefix for comments (use "" for none)
+  context_mode: replace        # "replace" existing comments or "append" to them
+
+# Swift-specific configuration
+swift:
+  functions:
+    - NSLocalizedString
+    - "String(localized:"
+    - "Text("
 ```
 
 ## Supported Formats
@@ -154,17 +168,42 @@ common.save,Save,Primary action button in forms and edit screens,button,neutral,
 error.network,Unable to connect,Error message shown when network requests fail,alert,apologetic,,ios/ProfileViewController.swift:94,
 ```
 
-### Write-Back Example
+### Write-Back Examples
+
+#### Translation Files (`--write-back`)
 
 **Before** (`Localizable.strings`):
 ```
+/* Settings screen title */
 "settings.title" = "Settings";
 ```
 
-**After** (with `--write-back`):
+**After**:
 ```
-/* Context: Navigation bar title for the main settings screen */
+/* Settings screen title
+Context: Navigation bar title for the main settings screen */
 "settings.title" = "Settings";
+```
+
+#### Swift Source Code (`--write-back-to-code`)
+
+**Before**:
+```swift
+let title = NSLocalizedString("settings.title", comment: "Settings screen title")
+```
+
+**After**:
+```swift
+let title = NSLocalizedString("settings.title", comment: "Context: Navigation bar title for the main settings screen")
+```
+
+#### Without Prefix (`--context-prefix ""`)
+
+If you prefer no prefix, use `--context-prefix ""`:
+
+```swift
+// Result with --context-prefix ""
+let title = NSLocalizedString("settings.title", comment: "Navigation bar title for the main settings screen")
 ```
 
 ## How It Works
@@ -173,6 +212,35 @@ error.network,Unable to connect,Error message shown when network requests fail,a
 2. **Search**: Uses ripgrep to find where each key is used in source code
 3. **Analyze**: Sends code context to Claude to understand UI usage
 4. **Output**: Writes context to CSV/JSON and optionally back to source files
+
+## CI Integration
+
+Use `--diff-base` to process only changed translation keys in a PR, avoiding the need for persistent cache:
+
+```bash
+# Process only keys changed since main branch
+txcontext extract \
+  -t Localizable.strings \
+  -s ios/ \
+  --diff-base origin/main \
+  --write-back-to-code \
+  --context-prefix "" \
+  --no-cache
+```
+
+Example GitHub Actions workflow:
+
+```yaml
+- name: Add translation context
+  run: |
+    txcontext extract \
+      -t ios/Resources/Localizable.strings \
+      -s ios/ \
+      --diff-base origin/main \
+      --write-back-to-code \
+      --no-cache
+    git diff --quiet || git commit -am "Add translation context"
+```
 
 ## Caching
 
