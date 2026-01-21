@@ -1,11 +1,9 @@
 # frozen_string_literal: true
 
-require "rexml/document"
-
 module Txcontext
   module Writers
     # Writer that updates Android strings.xml files with context comments
-    # Uses REXML for proper XML manipulation
+    # Uses line-by-line approach to preserve original formatting
     class AndroidXmlWriter
       def initialize(context_prefix: "Context: ", context_mode: "replace")
         @context_prefix = context_prefix
@@ -15,31 +13,44 @@ module Txcontext
       def write(results, source_path)
         return unless File.exist?(source_path)
 
-        content = File.read(source_path, encoding: "UTF-8")
-        doc = REXML::Document.new(content)
+        lines = File.readlines(source_path, encoding: "UTF-8")
         results_by_key = results.to_h { |r| [r.key, r] }
 
-        # Process each string element
-        doc.elements.each("resources/string") do |element|
-          key = element.attributes["name"]
-          result = results_by_key[key]
+        output_lines = []
+        i = 0
 
-          next unless result&.description
-          next if skip_description?(result.description)
+        while i < lines.length
+          line = lines[i]
 
-          update_element_comment(element, result.description)
+          # Check if this line is a string element
+          if (match = line.match(/^(\s*)<string\s+name="([^"]+)"[^>]*>.*<\/string>\s*$/))
+            indent = match[1]
+            key = match[2]
+            result = results_by_key[key]
+
+            if result&.description && !skip_description?(result.description)
+              context_text = "#{@context_prefix}#{escape_comment(result.description)}"
+
+              # Check if previous line is a comment
+              if output_lines.any? && output_lines.last.match?(/^\s*<!--.*-->\s*$/)
+                # Update existing comment
+                existing_comment_line = output_lines.pop
+                existing_match = existing_comment_line.match(/^\s*<!--\s*(.*?)\s*-->\s*$/)
+                existing_comment = existing_match ? existing_match[1] : ""
+                new_comment = build_comment(existing_comment, context_text)
+                output_lines << "#{indent}<!-- #{new_comment} -->\n"
+              else
+                # Insert new comment
+                output_lines << "#{indent}<!-- #{context_text} -->\n"
+              end
+            end
+          end
+
+          output_lines << line
+          i += 1
         end
 
-        # Write back with preserved formatting
-        output = String.new
-        formatter = REXML::Formatters::Pretty.new(4)
-        formatter.compact = true
-        formatter.write(doc, output)
-
-        # Fix common formatting issues
-        output = fix_formatting(output, content)
-
-        File.write(source_path, output)
+        File.write(source_path, output_lines.join)
       end
 
       private
@@ -48,45 +59,19 @@ module Txcontext
         description.include?("No usage found") || description.include?("Processing failed")
       end
 
-      def update_element_comment(element, description)
-        context_text = "#{@context_prefix}#{escape_comment(description)}"
-
-        # Find existing comment before this element
-        prev_sibling = element.previous_sibling
-
-        # Skip whitespace text nodes
-        while prev_sibling.is_a?(REXML::Text) && prev_sibling.to_s.strip.empty?
-          prev_sibling = prev_sibling.previous_sibling
-        end
-
-        if prev_sibling.is_a?(REXML::Comment)
-          existing_text = prev_sibling.to_s.strip
-
-          if @context_mode == "replace"
-            # Replace entire comment
-            prev_sibling.string = " #{context_text} "
-          elsif !@context_prefix.empty? && existing_text.start_with?(@context_prefix)
-            # Update existing context line (idempotent)
-            prev_sibling.string = " #{context_text} "
-          else
-            # Append to existing comment
-            prev_sibling.string = " #{existing_text} #{context_text} "
-          end
+      def build_comment(existing_comment, context_text)
+        if existing_comment.nil? || existing_comment.empty?
+          context_text
+        elsif @context_mode == "replace"
+          # Replace entire comment with new context
+          context_text
+        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
+          # Replace existing context line (idempotent update)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_text)
         else
-          # Insert new context comment before the element
-          insert_comment_before(element, context_text)
+          # Append context to existing comment
+          "#{existing_comment} #{context_text}"
         end
-      end
-
-      def insert_comment_before(element, text)
-        parent = element.parent
-        index = parent.index(element)
-
-        # Create comment node
-        comment = REXML::Comment.new(" #{text} ")
-
-        # Insert comment and a newline before the element
-        parent.insert_before(element, comment)
       end
 
       def escape_comment(text)
@@ -95,19 +80,6 @@ module Txcontext
           .gsub("--", "- -") # Double dash not allowed in XML comments
           .gsub("\n", " ")
           .strip
-      end
-
-      def fix_formatting(output, original_content)
-        # Preserve original XML declaration style if present
-        if original_content.start_with?("<?xml")
-          original_decl = original_content.match(/^<\?xml[^?]*\?>/)[0]
-          output = output.sub(/^<\?xml[^?]*\?>/, original_decl)
-        end
-
-        # Ensure file ends with newline
-        output = "#{output.rstrip}\n"
-
-        output
       end
     end
   end

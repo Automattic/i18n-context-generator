@@ -48,6 +48,14 @@ module Txcontext
           ## Task
           Analyze how this string is used in the mobile app code and provide context for translators.
 
+          **IMPORTANT - Avoid False Positives:**
+          - Look for ACTUAL UI USAGE, not coincidental code patterns
+          - Ignore method calls that happen to match the key (e.g., `.apply()`, `.close()`, `.clear()` are methods, not UI strings)
+          - Ignore boolean/string comparisons (e.g., `if value == "yes"` is not UI usage)
+          - Ignore analytics event names or tracking parameters
+          - Focus on localization patterns: getString(), NSLocalizedString(), Text(), @string/, R.string., etc.
+          - If no clear UI usage is found in the code, base your description on the text itself and common mobile UI patterns
+
           Focus on:
           1. **Where it appears**: What screen or view displays this text?
           2. **UI element type**: Is it a button label, navigation title, alert message, placeholder, etc.?
@@ -58,6 +66,12 @@ module Txcontext
           - The purpose of this text in the app
           - The UI context where it appears
           - Any important considerations for translation
+
+          **Quality Guidelines:**
+          - Be SPECIFIC about WHERE and HOW the text is used, not just what it means
+          - Avoid vague descriptions like "used throughout the app" - identify specific screens/features
+          - If the text is a common UI term (Save, Cancel, OK), describe its specific usage context in THIS app
+          - Don't mention code implementation details - focus on the user-facing experience
 
           Respond with ONLY a JSON object (no markdown, no explanation):
           {

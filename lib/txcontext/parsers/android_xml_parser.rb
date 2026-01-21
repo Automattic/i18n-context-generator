@@ -31,12 +31,12 @@ module Txcontext
         # Also parse string arrays
         doc.elements.each("resources/string-array") do |array_element|
           array_name = array_element.attributes["name"]
-          array_element.elements.each_with_index("item", 1) do |item, index|
+          array_element.elements.to_a("item").each_with_index do |item, index|
             entries << TranslationEntry.new(
-              key: "#{array_name}[#{index - 1}]",
+              key: "#{array_name}[#{index}]",
               text: unescape_android_string(item.text || ""),
               source_file: path,
-              metadata: { array: array_name, index: index - 1 }
+              metadata: { array: array_name, index: index }
             )
           end
         end
