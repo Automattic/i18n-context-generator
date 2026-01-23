@@ -5,8 +5,6 @@ require "yaml"
 require "csv"
 require "digest"
 require "fileutils"
-require "shellwords"
-
 require "oj"
 require "httpx"
 require "concurrent"

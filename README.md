@@ -2,8 +2,6 @@
 
 A CLI tool that extracts contextual information from mobile app source code to improve translation quality. Uses AI to analyze how localized strings are used in your iOS and Android codebase and generates descriptions to help translators produce better translations.
 
-Inspired by [Crowdin's Context Harvester](https://github.com/crowdin/context-harvester), but vendor-agnostic and focused on mobile apps.
-
 ## Features
 
 - **iOS Support**: Parses `.strings` files and searches Swift/Objective-C code
@@ -23,7 +21,6 @@ chmod +x exe/txcontext
 ### Requirements
 
 - Ruby 3.1+
-- [ripgrep](https://github.com/BurntSushi/ripgrep) (`brew install ripgrep`)
 - An Anthropic API key (or other supported LLM provider)
 
 ## Quick Start
@@ -209,7 +206,7 @@ let title = NSLocalizedString("settings.title", comment: "Navigation bar title f
 ## How It Works
 
 1. **Parse**: Reads translation keys from `.strings` or `strings.xml` files
-2. **Search**: Uses ripgrep to find where each key is used in source code
+2. **Search**: Scans source code to find where each key is used
 3. **Analyze**: Sends code context to Claude to understand UI usage
 4. **Output**: Writes context to CSV/JSON and optionally back to source files
 
