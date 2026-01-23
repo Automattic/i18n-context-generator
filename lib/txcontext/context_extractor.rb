@@ -39,6 +39,7 @@ module Txcontext
       entries = load_translations
       entries = filter_entries(entries) if @config.key_filter
       entries = filter_by_diff(entries) if @config.diff_base
+      entries = filter_by_range(entries) if @config.start_key || @config.end_key
 
       if entries.empty?
         if @config.diff_base
@@ -126,6 +127,36 @@ module Txcontext
       puts "Found #{changed_keys.size} changed keys in git diff"
 
       entries.select { |entry| changed_keys.include?(entry.key) }
+    end
+
+    def filter_by_range(entries)
+      start_idx = 0
+      end_idx = entries.size - 1
+
+      if @config.start_key
+        found_idx = entries.find_index { |e| e.key == @config.start_key }
+        if found_idx
+          start_idx = found_idx
+        else
+          puts "Warning: start_key '#{@config.start_key}' not found, starting from beginning"
+        end
+      end
+
+      if @config.end_key
+        found_idx = entries.find_index { |e| e.key == @config.end_key }
+        if found_idx
+          end_idx = found_idx
+        else
+          puts "Warning: end_key '#{@config.end_key}' not found, processing to end"
+        end
+      end
+
+      range_info = []
+      range_info << "from '#{@config.start_key}'" if @config.start_key
+      range_info << "to '#{@config.end_key}'" if @config.end_key
+      puts "Filtering #{range_info.join(' ')}: keys #{start_idx + 1} to #{end_idx + 1}"
+
+      entries[start_idx..end_idx]
     end
 
     def process_entries(entries)

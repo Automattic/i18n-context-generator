@@ -7,7 +7,7 @@ module Txcontext
                 :max_matches_per_key, :output_path, :output_format,
                 :no_cache, :dry_run, :key_filter, :custom_prompt, :write_back,
                 :swift_functions, :write_back_to_code, :diff_base, :context_prefix,
-                :context_mode
+                :context_mode, :start_key, :end_key
 
     DEFAULT_CONTEXT_PREFIX = "Context: "
     DEFAULT_CONTEXT_MODE = "replace" # "replace" or "append"
@@ -33,6 +33,8 @@ module Txcontext
       @diff_base = attrs[:diff_base]
       @context_prefix = attrs.key?(:context_prefix) ? attrs[:context_prefix] : DEFAULT_CONTEXT_PREFIX
       @context_mode = attrs[:context_mode] || DEFAULT_CONTEXT_MODE
+      @start_key = attrs[:start_key]
+      @end_key = attrs[:end_key]
     end
 
     def default_swift_functions
@@ -101,7 +103,9 @@ module Txcontext
         write_back_to_code: options[:write_back_to_code] || false,
         diff_base: options[:diff_base],
         context_prefix: options[:context_prefix],
-        context_mode: options[:context_mode]
+        context_mode: options[:context_mode],
+        start_key: options[:start_key],
+        end_key: options[:end_key]
       )
     end
 
@@ -118,6 +122,8 @@ module Txcontext
       @diff_base = options[:diff_base] if options[:diff_base]
       @context_prefix = options[:context_prefix] if options.key?(:context_prefix)
       @context_mode = options[:context_mode] if options[:context_mode]
+      @start_key = options[:start_key] if options[:start_key]
+      @end_key = options[:end_key] if options[:end_key]
       self
     end
 

@@ -43,6 +43,8 @@ module Txcontext
     option :diff_base, type: :string, desc: "Only process keys changed since this git ref (e.g., main, origin/main)"
     option :context_prefix, type: :string, default: "Context: ", desc: "Prefix for context comments (use empty string for no prefix)"
     option :context_mode, type: :string, default: "replace", enum: %w[replace append], desc: "How to handle existing comments: replace or append"
+    option :start_key, type: :string, desc: "Start processing from this key (inclusive)"
+    option :end_key, type: :string, desc: "Stop processing at this key (inclusive)"
 
     def extract
       validate_options!
