@@ -160,20 +160,26 @@ module Txcontext
     end
 
     def process_entries(entries)
+      # Ensure output is not buffered
+      $stdout.sync = true
+
       progress = TTY::ProgressBar.new(
-        "[:bar] :current/:total :percent :eta",
+        "[:bar] :current/:total :percent :eta :key",
         total: entries.size,
-        width: 40
+        width: 30,
+        output: $stdout
       )
 
       # Use a thread pool for concurrent processing
       pool = Concurrent::FixedThreadPool.new(@config.concurrency)
       semaphore = Concurrent::Semaphore.new(@config.concurrency)
+      current_key = Concurrent::AtomicReference.new("")
 
       entries.each do |entry|
         pool.post do
           semaphore.acquire
           begin
+            current_key.set(entry.key.truncate(40))
             result = process_entry(entry)
             @results << result
             @errors << result if result.error
@@ -189,13 +195,14 @@ module Txcontext
             @errors << result
           ensure
             semaphore.release
-            progress.advance
+            progress.advance(key: current_key.get)
           end
         end
       end
 
       pool.shutdown
       pool.wait_for_termination
+      puts # New line after progress bar
     end
 
     def process_entry(entry)
