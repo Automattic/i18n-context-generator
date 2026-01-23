@@ -200,9 +200,9 @@ module Txcontext
       # Android keys use underscores, not dots typically
       escaped = Regexp.escape(key)
       [
-        # R.string.key_name
+        # R.string.key_name - standard pattern
         "R\\.string\\.#{escaped}\\b",
-        # @string/key_name in XML
+        # @string/key_name in XML layouts
         "@string/#{escaped}\\b",
         # getString(R.string.key_name)
         "getString\\s*\\(\\s*R\\.string\\.#{escaped}",
@@ -210,6 +210,13 @@ module Txcontext
         "\\.getString\\s*\\(\\s*R\\.string\\.#{escaped}",
         # stringResource(R.string.key_name) - Jetpack Compose
         "stringResource\\s*\\(\\s*R\\.string\\.#{escaped}",
+        # Static import pattern: string.key_name (from `import ...R.string`)
+        # Match when preceded by (, ,, =, or whitespace to avoid false positives
+        "[\\(\\s,=]string\\.#{escaped}\\b",
+        # getString(string.key_name) - with static import
+        "getString\\s*\\(\\s*string\\.#{escaped}",
+        # stringResource(string.key_name) - Jetpack Compose with static import
+        "stringResource\\s*\\(\\s*string\\.#{escaped}",
       ]
     end
 
