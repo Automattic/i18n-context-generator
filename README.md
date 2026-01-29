@@ -57,7 +57,7 @@ bundle exec exe/txcontext extract \
 ### CLI Options
 
 ```
--c, --config CONFIG        Path to config file (txcontext.yml)
+-c, --config CONFIG        Path to config file (.txcontext.yml)
 -t, --translations FILES   Translation file(s), comma-separated
 -s, --source DIRS          Source directory(ies) to search, comma-separated
 -o, --output PATH          Output file path (default: translation-context.csv)
@@ -82,10 +82,10 @@ bundle exec exe/txcontext extract \
 bundle exec exe/txcontext init
 
 # Run with config
-bundle exec exe/txcontext extract --config txcontext.yml
+bundle exec exe/txcontext extract --config .txcontext.yml
 ```
 
-Example `txcontext.yml`:
+Example `.txcontext.yml`:
 
 ```yaml
 # Translation files to process

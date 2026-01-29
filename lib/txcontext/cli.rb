@@ -25,9 +25,9 @@ module Txcontext
         txcontext extract -t Localizable.strings -s . --write-back
 
         # Use config file
-        txcontext extract --config txcontext.yml
+        txcontext extract --config .txcontext.yml
     DESC
-    option :config, aliases: "-c", desc: "Path to config file (txcontext.yml)"
+    option :config, aliases: "-c", desc: "Path to config file (.txcontext.yml)"
     option :translations, aliases: "-t", desc: "Translation file(s), comma-separated"
     option :source, aliases: "-s", desc: "Source directory(ies) to search, comma-separated"
     option :output, aliases: "-o", default: "translation-context.csv", desc: "Output file path"
@@ -66,7 +66,7 @@ module Txcontext
     option :force, type: :boolean, default: false, desc: "Overwrite existing config"
 
     def init
-      config_path = "txcontext.yml"
+      config_path = ".txcontext.yml"
 
       if File.exist?(config_path) && !options[:force]
         say_error "Config file already exists. Use --force to overwrite."
