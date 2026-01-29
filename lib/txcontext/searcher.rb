@@ -1,12 +1,12 @@
 # frozen_string_literal: true
 
-require "set"
+require 'set'
 
 module Txcontext
   class Searcher
     # Represents a code match with surrounding context
     Match = Data.define(:file, :line, :match_line, :context) do
-      def initialize(file:, line:, match_line: "", context: "")
+      def initialize(file:, line:, match_line: '', context: '')
         super
       end
     end
@@ -19,14 +19,14 @@ module Txcontext
       /!=\s*["']/,             # String comparisons like != "no"
       /["']\s*!=/,             # String comparisons like "no" !=
       /\.equals\(["']/,        # Java .equals("string")
-      /contentEquals\(["']/,   # Kotlin contentEquals
+      /contentEquals\(["']/    # Kotlin contentEquals
     ].freeze
 
     # File extensions to search by platform
     FILE_EXTENSIONS = {
       ios: %w[.swift .m .mm .h].freeze,
       android: %w[.kt .java .xml].freeze,
-      unknown: %w[.swift .m .mm .h .kt .java .xml].freeze,
+      unknown: %w[.swift .m .mm .h .kt .java .xml].freeze
     }.freeze
 
     def initialize(source_paths:, ignore_patterns:, context_lines: 15, platform: nil)
@@ -45,7 +45,7 @@ module Txcontext
       all_matches = []
 
       files.each do |file|
-        matches = search_file(file, patterns)
+        matches = search_file(file, patterns, key)
         all_matches.concat(matches)
       end
 
@@ -60,11 +60,11 @@ module Txcontext
 
         if File.directory?(path)
           # Quick check using Find to avoid globbing entire trees
-          return :ios if Dir.glob(File.join(path, "**", "*.swift"), File::FNM_DOTMATCH).first
-          return :android if Dir.glob(File.join(path, "**", "*.kt"), File::FNM_DOTMATCH).first
-        elsif path.end_with?(".swift", ".m", ".mm")
+          return :ios if Dir.glob(File.join(path, '**', '*.swift'), File::FNM_DOTMATCH).first
+          return :android if Dir.glob(File.join(path, '**', '*.kt'), File::FNM_DOTMATCH).first
+        elsif path.end_with?('.swift', '.m', '.mm')
           return :ios
-        elsif path.end_with?(".kt", ".java")
+        elsif path.end_with?('.kt', '.java')
           return :android
         end
       end
@@ -79,10 +79,10 @@ module Txcontext
       # Convert glob pattern to regex
       # Handle common glob patterns: *, **, ?
       regex_str = Regexp.escape(glob_pattern)
-                        .gsub('\*\*/', ".*/")     # **/ matches any path
-                        .gsub('\*\*', ".*")       # ** matches anything
-                        .gsub('\*', "[^/]*")      # * matches within path segment
-                        .gsub('\?', ".")          # ? matches single char
+                        .gsub('\*\*/', '.*/')     # **/ matches any path
+                        .gsub('\*\*', '.*')       # ** matches anything
+                        .gsub('\*', '[^/]*')      # * matches within path segment
+                        .gsub('\?', '.')          # ? matches single char
       Regexp.new(regex_str)
     end
 
@@ -97,8 +97,8 @@ module Txcontext
           files << path if extensions.any? { |ext| path.end_with?(ext) }
         elsif File.directory?(path)
           # Build a single glob pattern for all extensions
-          ext_pattern = extensions.size == 1 ? "*#{extensions.first}" : "*{#{extensions.join(",")}}"
-          files.concat(Dir.glob(File.join(path, "**", ext_pattern)))
+          ext_pattern = extensions.size == 1 ? "*#{extensions.first}" : "*{#{extensions.join(',')}}"
+          files.concat(Dir.glob(File.join(path, '**', ext_pattern)))
         end
       end
 
@@ -110,10 +110,10 @@ module Txcontext
       @ignore_patterns.any? { |pattern| pattern.match?(file) }
     end
 
-    def search_file(file, patterns)
+    def search_file(file, patterns, key)
       matches = []
       lines = []
-      match_indices = []
+      match_indices = Set.new
 
       # Read file and find all matching line indices in a single pass
       File.foreach(file).with_index do |line, index|
@@ -121,9 +121,14 @@ module Txcontext
         lines << line
 
         # Check if any pattern matches this line
-        if patterns.any? { |pattern| pattern.match?(line) }
-          match_indices << index
-        end
+        match_indices << index if patterns.any? { |pattern| pattern.match?(line) }
+      end
+
+      # For iOS files, also check for multi-line NSLocalizedString patterns
+      # where the function call and key are on different lines
+      if @platform == :ios && file.end_with?('.swift', '.m', '.mm', '.h')
+        multiline_matches = find_multiline_ios_matches(lines, patterns, key)
+        match_indices.merge(multiline_matches)
       end
 
       # Build Match objects for each match with context
@@ -144,9 +149,34 @@ module Txcontext
       []
     rescue ArgumentError => e
       # Skip files with encoding issues (binary files, etc.)
-      return [] if e.message.include?("invalid byte sequence")
+      return [] if e.message.include?('invalid byte sequence')
 
       raise
+    end
+
+    # Find matches where localization calls span multiple lines
+    # e.g., NSLocalizedString(\n    "key",\n    comment: "...")
+    def find_multiline_ios_matches(lines, patterns, key)
+      key_pattern = /["']#{Regexp.escape(key)}["']/
+
+      lines.each_with_index.filter_map do |line, index|
+        next if patterns.any? { |p| p.match?(line) }  # Already a single-line match
+        next unless key_pattern.match?(line)          # Doesn't contain the key
+
+        index if preceded_by_localization_opener?(lines, index)
+      end.to_set
+    end
+
+    def preceded_by_localization_opener?(lines, index, lookback: 5)
+      start_idx = [0, index - lookback].max
+
+      (start_idx...index).reverse_each do |i|
+        line = lines[i]
+        return true if IOS_FUNCTION_OPENERS.any? { |opener| opener.match?(line) }
+        return false if line =~ /;\s*$/ || line =~ /\)\s*$/ # Hit a statement boundary
+      end
+
+      false
     end
 
     def extract_context(lines, match_index)
@@ -156,11 +186,7 @@ module Txcontext
       context_parts = []
 
       (start_idx..end_idx).each do |i|
-        if i == match_index
-          context_parts << ">>> #{lines[i]}"
-        else
-          context_parts << lines[i]
-        end
+        context_parts << (i == match_index ? ">>> #{lines[i]}" : lines[i])
       end
 
       context_parts.join("\n")
@@ -180,6 +206,15 @@ module Txcontext
       pattern_strings.map { |p| Regexp.new(p) }
     end
 
+    # Patterns that indicate the start of a localization function call
+    # Used for multi-line matching when the key is on a different line
+    IOS_FUNCTION_OPENERS = [
+      /NSLocalizedString\s*\(\s*$/,
+      /String\s*\(\s*localized:\s*$/,
+      /LocalizedStringKey\s*\(\s*$/,
+      /Text\s*\(\s*$/
+    ].freeze
+
     def build_ios_patterns(key)
       escaped = Regexp.escape(key)
       [
@@ -192,7 +227,7 @@ module Txcontext
         # Text("key") - SwiftUI (when using localized strings)
         "Text\\s*\\(\\s*[\"']#{escaped}[\"']",
         # .localized extension pattern
-        "[\"']#{escaped}[\"']\\.localized",
+        "[\"']#{escaped}[\"']\\.localized"
       ]
     end
 
@@ -216,25 +251,20 @@ module Txcontext
         # getString(string.key_name) - with static import
         "getString\\s*\\(\\s*string\\.#{escaped}",
         # stringResource(string.key_name) - Jetpack Compose with static import
-        "stringResource\\s*\\(\\s*string\\.#{escaped}",
+        "stringResource\\s*\\(\\s*string\\.#{escaped}"
       ]
     end
 
     def filter_matches(matches, key)
       seen = Set.new
-      filtered = []
-
-      matches.each do |match|
+      matches.select do |match|
         location = "#{match.file}:#{match.line}"
-        next if seen.include?(location)
-        next if false_positive?(match.match_line, key)
-        next if translation_file?(match.file)
+        next false if seen.include?(location)
+        next false if false_positive?(match.match_line, key)
+        next false if translation_file?(match.file)
 
         seen.add(location)
-        filtered << match
       end
-
-      filtered
     end
 
     def false_positive?(line, _key)
@@ -248,9 +278,9 @@ module Txcontext
       ext = File.extname(file).downcase
 
       # Skip translation files - we want code usage, not definitions
-      return true if ext == ".strings"
-      return true if basename == "strings.xml"
-      return true if file.include?("/res/values") && ext == ".xml"
+      return true if ext == '.strings'
+      return true if basename == 'strings.xml'
+      return true if file.include?('/res/values') && ext == '.xml'
 
       false
     end
