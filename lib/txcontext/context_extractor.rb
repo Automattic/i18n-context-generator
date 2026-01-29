@@ -61,7 +61,11 @@ module Txcontext
       end
 
       process_entries(entries)
-      write_output
+
+      if @config.output_path
+        write_output
+        puts "\nWrote #{@results.size} results to #{@config.output_path}"
+      end
 
       if @config.write_back
         write_back_to_source
@@ -71,7 +75,6 @@ module Txcontext
         write_back_to_code
       end
 
-      puts "\nWrote #{@results.size} results to #{@config.output_path}"
       puts "Errors: #{@errors.size}" if @errors.any?
     end
 

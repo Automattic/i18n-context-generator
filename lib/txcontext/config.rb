@@ -21,7 +21,7 @@ module Txcontext
       @concurrency = attrs[:concurrency] || 5
       @context_lines = attrs[:context_lines] || 20
       @max_matches_per_key = attrs[:max_matches_per_key] || 3
-      @output_path = attrs[:output_path] || "translation-context.csv"
+      @output_path = attrs.key?(:output_path) ? attrs[:output_path] : "translation-context.csv"
       @output_format = attrs[:output_format] || "csv"
       @no_cache = attrs[:no_cache] || false
       @dry_run = attrs[:dry_run] || false
