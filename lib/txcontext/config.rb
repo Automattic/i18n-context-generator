@@ -21,9 +21,9 @@ module Txcontext
       @concurrency = attrs[:concurrency] || 5
       @context_lines = attrs[:context_lines] || 20
       @max_matches_per_key = attrs[:max_matches_per_key] || 3
-      @output_path = attrs.key?(:output_path) ? attrs[:output_path] : "translation-context.csv"
+      @output_path = attrs.key?(:output_path) ? attrs[:output_path] : nil
       @output_format = attrs[:output_format] || "csv"
-      @no_cache = attrs[:no_cache] || false
+      @no_cache = attrs.key?(:no_cache) ? attrs[:no_cache] : true
       @dry_run = attrs[:dry_run] || false
       @key_filter = attrs[:key_filter]
       @custom_prompt = attrs[:custom_prompt]
@@ -61,7 +61,7 @@ module Txcontext
         concurrency: yaml.dig("processing", "concurrency") || 5,
         context_lines: yaml.dig("processing", "context_lines") || 20,
         max_matches_per_key: yaml.dig("processing", "max_matches_per_key") || 3,
-        output_path: yaml.dig("output", "path") || "translation-context.csv",
+        output_path: yaml.dig("output", "path"),
         output_format: yaml.dig("output", "format") || "csv",
         write_back: yaml.dig("output", "write_back") || false,
         write_back_to_code: yaml.dig("output", "write_back_to_code") || false,
@@ -94,9 +94,9 @@ module Txcontext
         concurrency: options[:concurrency] || 5,
         context_lines: 20,
         max_matches_per_key: 3,
-        output_path: options[:output] || "translation-context.csv",
+        output_path: options[:output],
         output_format: options[:format] || "csv",
-        no_cache: options[:no_cache] || false,
+        no_cache: !options[:cache],
         dry_run: options[:dry_run] || false,
         key_filter: options[:keys],
         write_back: options[:write_back] || false,

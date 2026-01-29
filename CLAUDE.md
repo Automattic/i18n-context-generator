@@ -81,8 +81,11 @@ Calls Claude API with structured output. The prompt asks Claude to analyze:
 ## Running
 
 ```bash
-# Basic usage
+# Basic usage (no CSV output, no caching by default)
 bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources
+
+# With CSV output
+bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources -o context.csv
 
 # Dry run (no API calls)
 bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --dry-run
@@ -90,8 +93,8 @@ bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --dry-run
 # Specific keys only
 bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --keys "Add a tracking,Save"
 
-# Skip cache
-bundle exec exe/txcontext extract ... --no-cache
+# Enable caching (disabled by default)
+bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --cache
 ```
 
 ## Ruby API
@@ -107,8 +110,9 @@ config = Txcontext::Config.new(
   diff_base: 'origin/main',      # Only process changed keys
   write_back: true,              # Write context back to translation file
   context_prefix: '',            # No prefix (default is "Context: ")
-  context_mode: 'replace',       # Replace existing comments
-  output_path: 'translation-context.csv'
+  context_mode: 'replace'        # Replace existing comments
+  # output_path: 'out.csv'       # Optional: CSV only written if specified
+  # no_cache: false              # Optional: enable caching (disabled by default)
 )
 
 extractor = Txcontext::ContextExtractor.new(config)
@@ -125,8 +129,9 @@ Key `Txcontext::Config` parameters:
 - `write_back_to_code`: Write context to Swift `comment:` parameters
 - `context_prefix`: Prefix for context comments (empty string for none)
 - `context_mode`: `"replace"` or `"append"` existing comments
+- `output_path`: CSV output path (default: `nil`, no CSV written unless specified)
+- `no_cache`: Disable caching (default: `true`, caching disabled by default)
 - `dry_run`: Preview without LLM calls
-- `no_cache`: Disable result caching
 - `key_filter`: Comma-separated patterns to filter keys
 
 ## Testing Changes

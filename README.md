@@ -8,7 +8,7 @@ A CLI tool that extracts contextual information from mobile app source code to i
 - **Android Support**: Parses `strings.xml` files and searches Kotlin/Java code
 - **AI-Powered Context**: Uses Claude or other LLMs to understand UI context
 - **Write-Back**: Optionally writes context comments back to source files
-- **Caching**: Avoids re-processing unchanged translations
+- **Optional Caching**: Opt-in caching to avoid re-processing unchanged translations
 
 ## Installation
 
@@ -60,14 +60,14 @@ bundle exec exe/txcontext extract \
 -c, --config CONFIG        Path to config file (.txcontext.yml)
 -t, --translations FILES   Translation file(s), comma-separated
 -s, --source DIRS          Source directory(ies) to search, comma-separated
--o, --output PATH          Output file path (default: translation-context.csv)
+-o, --output PATH          Output file path (CSV only written if specified)
 -f, --format FORMAT        Output format: csv or json (default: csv)
 -p, --provider PROVIDER    LLM provider: anthropic (default: anthropic)
 -m, --model MODEL          LLM model to use
 -k, --keys PATTERNS        Filter keys (comma-separated patterns, supports * wildcard)
     --concurrency N        Number of concurrent requests (default: 5)
     --dry-run              Show what would be processed without calling LLM
-    --no-cache             Disable caching
+    --cache                Enable caching (disabled by default)
     --write-back           Write context back to source translation files (.strings, strings.xml)
     --write-back-to-code   Write context back to Swift source code comment: parameters
     --diff-base REF        Only process keys changed since this git ref (e.g., main, origin/main)
@@ -212,7 +212,7 @@ let title = NSLocalizedString("settings.title", comment: "Navigation bar title f
 
 ## CI Integration
 
-Use `--diff-base` to process only changed translation keys in a PR, avoiding the need for persistent cache:
+Use `--diff-base` to process only changed translation keys in a PR:
 
 ```bash
 # Process only keys changed since main branch
@@ -221,8 +221,7 @@ txcontext extract \
   -s ios/ \
   --diff-base origin/main \
   --write-back-to-code \
-  --context-prefix "" \
-  --no-cache
+  --context-prefix ""
 ```
 
 Example GitHub Actions workflow:
@@ -234,16 +233,19 @@ Example GitHub Actions workflow:
       -t ios/Resources/Localizable.strings \
       -s ios/ \
       --diff-base origin/main \
-      --write-back-to-code \
-      --no-cache
+      --write-back-to-code
     git diff --quiet || git commit -am "Add translation context"
 ```
 
 ## Caching
 
-Results are cached in `.txcontext-cache/` to avoid re-processing unchanged translations. Cache is invalidated when:
-- The translation text changes
-- You use `--no-cache` flag
+Caching is **disabled by default**. When enabled, results are cached in `.txcontext-cache/` to avoid re-processing unchanged translations.
+
+To enable caching:
+- CLI: Use `--cache` flag
+- Ruby API: Pass `no_cache: false` to `Config.new`
+
+Cache is invalidated when the translation text changes.
 
 ## Comparison with Crowdin Context Harvester
 
