@@ -37,11 +37,13 @@ Finds where translation keys are used in source code. Critical for providing con
 **Platform detection**: Auto-detects iOS vs Android based on file extensions in source paths.
 
 **iOS patterns** (single-line):
-- `NSLocalizedString("key", ...)`
-- `String(localized: "key", ...)`
-- `LocalizedStringKey("key")`
-- `Text("key")`
-- `"key".localized`
+- `NSLocalizedString("key", ...)` - Swift and Objective-C (supports `@"key"` syntax)
+- `String(localized: "key", ...)` - modern Swift
+- `LocalizedStringKey("key")` - SwiftUI
+- `Text("key")` - SwiftUI
+- `"key".localized` - common extension pattern
+
+**Supported file types**: `.swift`, `.m`, `.mm`, `.h`
 
 **Multi-line support**: iOS codebases often use multi-line `NSLocalizedString` calls:
 ```swift
@@ -134,17 +136,73 @@ Key `Txcontext::Config` parameters:
 - `dry_run`: Preview without LLM calls
 - `key_filter`: Comma-separated patterns to filter keys
 
-## Testing Changes
+## Testing
 
-No formal test suite exists. To verify searcher changes:
+### RSpec Test Suite
+
+Run the full test suite:
+
+```bash
+bundle exec rspec
+```
+
+Run specific spec files:
+
+```bash
+bundle exec rspec spec/txcontext/searcher_spec.rb
+bundle exec rspec spec/txcontext/parsers/
+```
+
+### Test Structure
+
+```
+spec/
+├── spec_helper.rb
+└── txcontext/
+    ├── searcher_spec.rb              # Pattern matching, multi-line, false positives
+    ├── config_spec.rb                # Config loading, CLI parsing, defaults
+    └── parsers/
+        ├── strings_parser_spec.rb    # iOS .strings parsing
+        └── android_xml_parser_spec.rb # Android XML parsing, plurals, arrays
+```
+
+### Test Fixtures
+
+Located in `test-fixtures/` with realistic iOS and Android source files:
+
+```
+test-fixtures/
+├── ios/
+│   ├── Localizable.strings           # Translation keys
+│   ├── SettingsViewController.swift  # NSLocalizedString patterns
+│   ├── ProfileViewController.swift   # Various iOS patterns
+│   ├── QuickStartView.swift          # SwiftUI Text/String(localized:)
+│   ├── MultilineExamples.swift       # Multi-line NSLocalizedString
+│   ├── SwiftUIExamples.swift         # LocalizedStringKey, Text patterns
+│   ├── LocalizedExtension.swift      # .localized extension
+│   ├── FalsePositives.swift          # Patterns that should NOT match
+│   └── LegacyStrings.m/.h            # Objective-C patterns
+└── android/
+    ├── res/values/strings.xml        # Translation keys
+    ├── res/layout/activity_main.xml  # @string/key XML patterns
+    └── app/src/main/java/com/example/myapp/
+        ├── SettingsActivity.kt       # getString() patterns
+        ├── ProfileActivity.kt        # Various Android patterns
+        ├── PostAdapter.kt            # R.string patterns
+        ├── ComposeScreen.kt          # stringResource() Jetpack Compose
+        └── StaticImportExample.kt    # Static import patterns
+```
+
+### Quick Manual Testing
+
+For ad-hoc searcher verification without running full specs:
 
 ```ruby
-# Quick test script
 $LOAD_PATH.unshift "lib"
 require "txcontext/searcher"
 
 searcher = Txcontext::Searcher.new(
-  source_paths: ["/path/to/ios/source"],
+  source_paths: ["test-fixtures/ios"],
   ignore_patterns: [],
   context_lines: 10,
   platform: :ios
