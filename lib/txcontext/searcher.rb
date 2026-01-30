@@ -218,8 +218,9 @@ module Txcontext
     def build_ios_patterns(key)
       escaped = Regexp.escape(key)
       [
-        # NSLocalizedString("key", ...) - most common
-        "NSLocalizedString\\s*\\(\\s*[\"']#{escaped}[\"']",
+        # NSLocalizedString("key", ...) - most common (Swift and Obj-C)
+        # Note: @? handles optional @ prefix for Objective-C @"string" syntax
+        "NSLocalizedString\\s*\\(\\s*@?[\"']#{escaped}[\"']",
         # String(localized: "key", ...) - modern Swift
         "String\\s*\\(\\s*localized:\\s*[\"']#{escaped}[\"']",
         # LocalizedStringKey("key") - SwiftUI
