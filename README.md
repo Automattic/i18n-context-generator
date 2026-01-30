@@ -257,4 +257,6 @@ Results are cached in `.txcontext-cache/` to avoid re-processing unchanged trans
 
 ## License
 
-GPL-2.0-or-later
+<a href="https://github.com/iangmaia/txcontext/blob/trunk/LICENSE">
+    <img alt="License" src="https://img.shields.io/github/license/iangmaia/txcontext">
+</a>

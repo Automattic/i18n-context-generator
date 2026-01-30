@@ -5,13 +5,13 @@ require_relative "lib/txcontext/version"
 Gem::Specification.new do |spec|
   spec.name = "txcontext"
   spec.version = Txcontext::VERSION
-  spec.authors = ["Apps Infrastructure"]
-  spec.email = ["apps-infrastructure@automattic.com"]
+  spec.authors = 'Automattic'
+  spec.email = 'mobile@automattic.com'
 
   spec.summary = "Extract translation context from source code using AI"
   spec.description = "A CLI tool that analyzes source code to extract contextual information for translation keys, improving translation quality with AI-powered analysis."
   spec.homepage = "https://github.com/Automattic/txcontext"
-  spec.license = "GPL-2.0-or-later"
+  spec.license = 'MPL-2.0'
   spec.required_ruby_version = ">= 3.1.0"
 
   spec.files = Dir["lib/**/*", "exe/*", "LICENSE", "README.md"]
