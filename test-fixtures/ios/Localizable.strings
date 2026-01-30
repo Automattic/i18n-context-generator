@@ -41,3 +41,68 @@
 "quickstart.title" = "Quick Start";
 "quickstart.header" = "Get Started";
 "quickstart.markComplete" = "Mark All Complete";
+
+/* Multi-line Pattern Examples */
+"multiline.accessibility.label" = "Main content area";
+"multiline.accessibility.hint" = "Double tap to interact";
+"multiline.navigation.title" = "Navigation Title";
+"multiline.bundle.example" = "Loaded from bundle";
+"multiline.cell.title" = "Cell Title";
+"multiline.cell.subtitle" = "Cell Subtitle";
+"multiline.cell.a11y" = "Full cell accessibility label";
+"multiline.alert.title" = "Alert Title";
+"multiline.alert.message" = "Alert message body text";
+"multiline.alert.confirm" = "Confirm";
+"multiline.nested.deep" = "Deeply nested string";
+
+/* SwiftUI Examples */
+"swiftui.state.button" = "Button Title";
+"swiftui.header.title" = "Header";
+"swiftui.welcome.message" = "Welcome to the app!";
+"swiftui.custom.table" = "Custom Table String";
+"swiftui.bundle.string" = "Bundle String";
+"swiftui.label.title" = "Label Title";
+"swiftui.nav.destination" = "Destination";
+"swiftui.textfield.placeholder" = "Enter text...";
+"swiftui.toggle.label" = "Enable Feature";
+"swiftui.picker.title" = "Select Option";
+"swiftui.detail.content" = "Detail content here";
+"swiftui.multiline.key" = "Multi-line SwiftUI key";
+"swiftui.programmatic.string" = "Programmatic string";
+
+/* .localized Extension Examples */
+"extension.title" = "Extension Title";
+"extension.subtitle" = "Extension Subtitle";
+"extension.greeting.format" = "Hello, %@!";
+"extension.items.count" = "%d items";
+"extension.accessibility.hint" = "Tap to activate";
+"extension.alert.title" = "Alert";
+"extension.alert.message" = "Alert message";
+"extension.interpolated" = "Interpolated value";
+"extension.button.label" = "Button";
+"extension.uppercase.text" = "uppercase text";
+"extension.trimmed.text" = "  trimmed text  ";
+"extension.swiftui.title" = "SwiftUI Extension Title";
+"extension.swiftui.body" = "SwiftUI Extension Body";
+
+/* Objective-C Examples */
+"objc.screen.title" = "Screen Title";
+"objc.screen.subtitle" = "Screen Subtitle";
+"objc.screen.description" = "This is a long description text.";
+"objc.cell.title" = "Cell Title";
+"objc.cell.detail" = "Cell Detail";
+"objc.cell.accessibility" = "Full cell description for accessibility";
+"objc.alert.title" = "Alert Title";
+"objc.alert.message" = "Alert message text";
+"objc.alert.cancel" = "Cancel";
+"objc.alert.confirm" = "OK";
+"objc.format.count" = "%d items";
+"objc.format.plural" = "You have items";
+"objc.custom.key" = "Custom table string";
+"objc.bundle.key" = "Bundled string";
+
+/* Edge Cases for Testing */
+"key.with.dots" = "Key with multiple dots";
+"key-with-dashes" = "Key with dashes";
+"key_with_underscores" = "Key with underscores";
+"key.with" = "Partial key match test";

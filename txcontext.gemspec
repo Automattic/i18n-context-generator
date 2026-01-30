@@ -25,4 +25,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency "rexml", "~> 3.2"
   spec.add_dependency "thor", "~> 1.3"
   spec.add_dependency "tty-progressbar", "~> 0.18"
+
+  spec.add_development_dependency "rspec", "~> 3.12"
 end
