@@ -1,3 +1,22 @@
+# macOS
+.DS_Store
+
+# Bundler
+vendor/bundle/
+
+# Testing
+.rspec_status
+coverage/
+
+# Project-specific
 .txcontext-cache
 translation-context.csv
-.rspec_status
+
+# Editor/IDE
+*.swp
+*~
+.idea/
+.vscode/
+
+# Temp files
+tmp/
