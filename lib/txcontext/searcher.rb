@@ -1,12 +1,13 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'find'
 
 module Txcontext
   class Searcher
     # Represents a code match with surrounding context
-    Match = Data.define(:file, :line, :match_line, :context) do
-      def initialize(file:, line:, match_line: '', context: '')
+    Match = Data.define(:file, :line, :match_line, :context, :enclosing_scope) do
+      def initialize(file:, line:, match_line: '', context: '', enclosing_scope: nil)
         super
       end
     end
@@ -59,9 +60,11 @@ module Txcontext
         next unless File.exist?(path)
 
         if File.directory?(path)
-          # Quick check using Find to avoid globbing entire trees
-          return :ios if Dir.glob(File.join(path, '**', '*.swift'), File::FNM_DOTMATCH).first
-          return :android if Dir.glob(File.join(path, '**', '*.kt'), File::FNM_DOTMATCH).first
+          # Use Find with early return to avoid globbing entire trees
+          Find.find(path) do |f|
+            return :ios if f.end_with?('.swift', '.m', '.mm')
+            return :android if f.end_with?('.kt', '.java')
+          end
         elsif path.end_with?('.swift', '.m', '.mm')
           return :ios
         elsif path.end_with?('.kt', '.java')
@@ -134,11 +137,13 @@ module Txcontext
       # Build Match objects for each match with context
       match_indices.each do |match_index|
         context = extract_context(lines, match_index)
+        scope = extract_enclosing_scope(lines, match_index)
         matches << Match.new(
           file: file,
           line: match_index + 1, # 1-indexed line numbers
           match_line: lines[match_index],
-          context: context
+          context: context,
+          enclosing_scope: scope
         )
       end
 
@@ -177,6 +182,21 @@ module Txcontext
       end
 
       false
+    end
+
+    # Scan backwards from the match to find the nearest enclosing function/class/struct
+    def extract_enclosing_scope(lines, match_index)
+      match_index.downto(0) do |i|
+        line = lines[i]
+        if line =~ /\b(func|class|struct|enum|protocol)\s+(\w+)/
+          return "#{$1} #{$2}"
+        end
+        # Android/Kotlin patterns
+        if line =~ /\b(fun|class|object)\s+(\w+)/
+          return "#{$1} #{$2}"
+        end
+      end
+      nil
     end
 
     def extract_context(lines, match_index)

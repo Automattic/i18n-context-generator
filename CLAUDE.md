@@ -21,6 +21,7 @@ lib/txcontext/
 │   ├── json_parser.rb
 │   └── yaml_parser.rb
 └── writers/               # Write results
+    ├── helpers.rb         # Shared helpers (skip_description?, find_swift_files)
     ├── csv_writer.rb      # Default output format
     ├── json_writer.rb
     ├── strings_writer.rb  # Write-back to .strings
@@ -57,6 +58,8 @@ The searcher handles this by:
 1. First checking single-line patterns
 2. For iOS files, also running `find_multiline_ios_matches` which looks for quoted strings containing the key, then checks if preceding lines (up to 5) contain a function opener like `NSLocalizedString(`
 
+**Enclosing scope detection**: Each match also extracts the nearest enclosing function/class/struct name by scanning backwards from the match line. This helps the LLM understand which screen or component the string belongs to.
+
 **Android patterns**:
 - `R.string.key_name`
 - `@string/key_name` (XML)
@@ -74,11 +77,14 @@ Main orchestrator that:
 
 ### LLM Client (`lib/txcontext/llm/anthropic.rb`)
 
-Calls Claude API with structured output. The prompt asks Claude to analyze:
-- What UI element the string appears in
-- The tone/voice
-- Any length constraints
-- A description for translators
+Calls Claude API with structured output. The prompt includes:
+- The translation key and original text
+- Developer comments from the translation file (when available)
+- Format placeholder analysis (e.g., `%d` → "a number")
+- Code usage with enclosing scope info (e.g., "in func viewDidLoad")
+- A system message to improve structured JSON output reliability
+
+The Anthropic client includes retry logic with exponential backoff for rate limits (429 responses).
 
 ## Running
 

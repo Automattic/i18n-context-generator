@@ -2,6 +2,8 @@
 
 module Txcontext
   class ContextExtractor
+    include Writers::Helpers
+
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :ui_element, :tone,
                                    :max_length, :locations, :error) do
@@ -23,6 +25,8 @@ module Txcontext
         }
       end
     end
+
+    attr_reader :results, :errors
 
     def initialize(config)
       @config = config
@@ -236,7 +240,8 @@ module Txcontext
         key: entry.key,
         text: entry.text,
         matches: matches,
-        model: @config.model
+        model: @config.model,
+        comment: entry.metadata&.dig(:comment)
       )
 
       result = ExtractionResult.new(
@@ -299,16 +304,6 @@ module Txcontext
       end
 
       puts "Updated #{updated_count} Swift files with context comments" if updated_count > 0
-    end
-
-    def find_swift_files(path)
-      if File.file?(path) && path.end_with?(".swift")
-        [path]
-      elsif File.directory?(path)
-        Dir.glob(File.join(path, "**", "*.swift"))
-      else
-        []
-      end
     end
 
     def source_writer_for(path)

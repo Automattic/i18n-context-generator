@@ -5,6 +5,8 @@ module Txcontext
     # Writer that updates Android strings.xml files with context comments
     # Uses line-by-line approach to preserve original formatting
     class AndroidXmlWriter
+      include Helpers
+
       def initialize(context_prefix: "Context: ", context_mode: "replace")
         @context_prefix = context_prefix
         @context_mode = context_mode
@@ -54,10 +56,6 @@ module Txcontext
       end
 
       private
-
-      def skip_description?(description)
-        description.include?("No usage found") || description.include?("Processing failed")
-      end
 
       def build_comment(existing_comment, context_text)
         if existing_comment.nil? || existing_comment.empty?

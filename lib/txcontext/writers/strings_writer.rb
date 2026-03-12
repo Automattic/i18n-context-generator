@@ -5,6 +5,8 @@ module Txcontext
     # Writer that updates iOS .strings files with context comments
     # Uses the dotstrings gem for proper parsing and generation
     class StringsWriter
+      include Helpers
+
       def initialize(context_prefix: "Context: ", context_mode: "replace")
         @context_prefix = context_prefix
         @context_mode = context_mode
@@ -42,10 +44,6 @@ module Txcontext
       end
 
       private
-
-      def skip_description?(description)
-        description.include?("No usage found") || description.include?("Processing failed")
-      end
 
       def build_comment(existing_comment, context_description)
         context_line = "#{@context_prefix}#{context_description}"

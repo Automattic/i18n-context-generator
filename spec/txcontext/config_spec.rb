@@ -10,7 +10,7 @@ RSpec.describe Txcontext::Config do
       expect(config.ignore_patterns).to eq([])
       expect(config.provider).to eq("anthropic")
       expect(config.concurrency).to eq(5)
-      expect(config.context_lines).to eq(20)
+      expect(config.context_lines).to eq(15)
       expect(config.max_matches_per_key).to eq(3)
       expect(config.output_path).to be_nil
       expect(config.output_format).to eq("csv")
@@ -208,6 +208,15 @@ RSpec.describe Txcontext::Config do
 
       expect(result).to be(base_config)
     end
+
+    it "can set boolean options to false" do
+      config = described_class.new(dry_run: true, write_back: true)
+
+      config.merge_cli(dry_run: false, write_back: false)
+
+      expect(config.dry_run).to be false
+      expect(config.write_back).to be false
+    end
   end
 
   describe ".default_ignore_patterns" do
@@ -220,6 +229,19 @@ RSpec.describe Txcontext::Config do
       expect(patterns).to include("**/build/**")
       expect(patterns).to include("**/*.test.*")
       expect(patterns).to include("**/*.spec.*")
+    end
+
+    it "includes iOS/Android dependency and test patterns" do
+      patterns = described_class.default_ignore_patterns
+
+      expect(patterns).to include("**/Pods/**")
+      expect(patterns).to include("**/Carthage/**")
+      expect(patterns).to include("**/.build/**")
+      expect(patterns).to include("**/DerivedData/**")
+      expect(patterns).to include("**/*Tests.swift")
+      expect(patterns).to include("**/*Tests.kt")
+      expect(patterns).to include("**/*Test.java")
+      expect(patterns).to include("**/*Test.kt")
     end
   end
 

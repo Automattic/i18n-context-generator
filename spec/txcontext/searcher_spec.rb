@@ -338,5 +338,19 @@ RSpec.describe Txcontext::Searcher do
       expect(match.match_line).to be_a(String)
       expect(match.context).to be_a(String)
     end
+
+    it "includes enclosing scope when available" do
+      searcher = described_class.new(
+        source_paths: [ios_fixtures_path],
+        ignore_patterns: [],
+        platform: :ios
+      )
+
+      matches = searcher.search("settings.title")
+      match = matches.first
+
+      # Should detect the enclosing function or class
+      expect(match.enclosing_scope).not_to be_nil
+    end
   end
 end

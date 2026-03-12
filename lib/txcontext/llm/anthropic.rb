@@ -20,17 +20,31 @@ module Txcontext
         )
       end
 
-      def generate_context(key:, text:, matches:, model: nil)
+      MAX_RETRIES = 2
+
+      def generate_context(key:, text:, matches:, model: nil, comment: nil)
         model ||= DEFAULT_MODEL
-        prompt = build_prompt(key: key, text: text, matches: matches)
+        prompt = build_prompt(key: key, text: text, matches: matches, comment: comment)
+        retries = 0
 
-        response = @http.post(API_URL, json: {
-          model: model,
-          max_tokens: 500,
-          messages: [{ role: "user", content: prompt }]
-        })
+        loop do
+          response = @http.post(API_URL, json: {
+            model: model,
+            max_tokens: 500,
+            system: "You are a mobile app localization expert. Analyze code usage and provide concise, specific context for translators. Respond with only valid JSON.",
+            messages: [{ role: "user", content: prompt }]
+          })
 
-        handle_response(response)
+          # Retry on rate limit with backoff
+          if response.status == 429 && retries < MAX_RETRIES
+            retries += 1
+            delay = (response.headers["retry-after"]&.to_i || 2) * retries
+            sleep(delay)
+            next
+          end
+
+          return handle_response(response)
+        end
       rescue HTTPX::Error => e
         ContextResult.new(description: "API request failed", error: e.message)
       end

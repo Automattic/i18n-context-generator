@@ -24,14 +24,16 @@ module Txcontext
         end
       end
 
-      def generate_context(key:, text:, matches:, model: nil)
+      def generate_context(key:, text:, matches:, model: nil, comment: nil)
         raise NotImplementedError, "Subclasses must implement #generate_context"
       end
 
       protected
 
-      def build_prompt(key:, text:, matches:)
+      def build_prompt(key:, text:, matches:, comment: nil)
         platform = detect_platform(matches)
+
+        placeholder_info = detect_placeholders(text)
 
         <<~PROMPT
           You are analyzing a localized string from a #{platform} mobile app to help translators understand its context.
@@ -41,7 +43,7 @@ module Txcontext
 
           ## Original Text
           "#{text}"
-
+          #{"\n## Developer Comment\n\"#{comment}\"\n" if comment && !comment.strip.empty?}#{"\n## Format Placeholders\n#{placeholder_info}\n" if placeholder_info}
           ## Code Usage
           #{format_matches(matches)}
 
@@ -99,13 +101,37 @@ module Txcontext
 
       def format_matches(matches)
         matches.map.with_index do |match, i|
+          scope_info = match.enclosing_scope ? " (in #{match.enclosing_scope})" : ""
           <<~MATCH
-            ### Match #{i + 1}: #{match.file}:#{match.line}
+            ### Match #{i + 1}: #{match.file}:#{match.line}#{scope_info}
             ```
             #{match.context}
             ```
           MATCH
         end.join("\n")
+      end
+
+      def detect_placeholders(text)
+        # iOS: %@, %d, %f, %ld, %lld, %1$@, %2$d, etc.
+        # Android: %s, %d, %f, %1$s, %2$d, etc.
+        placeholders = text.scan(/%(?:(\d+)\$)?([#0 +'.-]*\d*(?:\.\d+)?(?:l{0,2}|h{0,2})?[diouxXeEfFgGaAcsSpn@])/)
+        return nil if placeholders.empty?
+
+        descriptions = []
+        # Also gather the raw matches for display
+        raw = text.scan(/%(?:\d+\$)?[#0 +'.-]*\d*(?:\.\d+)?(?:l{0,2}|h{0,2})?[diouxXeEfFgGaAcsSpn@]/)
+        raw.each_with_index do |placeholder, i|
+          type_hint = case placeholder
+                      when /%.*[di]/ then "a number"
+                      when /%.*[fFeEgGaA]/ then "a decimal number"
+                      when /%.*[@sS]/ then "a string value"
+                      else "a value"
+                      end
+          descriptions << "#{placeholder} — #{type_hint}"
+        end
+
+        "This string contains #{raw.size} placeholder(s) that must be preserved in translation:\n" +
+          descriptions.map { |d| "- #{d}" }.join("\n")
       end
 
       def parse_response(text)
@@ -131,14 +157,26 @@ module Txcontext
         # Try to find JSON object in the response
         # Handle both raw JSON and markdown-wrapped JSON
         if text.include?("```")
-          # Extract from code block
           match = text.match(/```(?:json)?\s*(\{[^`]+\})\s*```/m)
           return match[1] if match
         end
 
-        # Try to find raw JSON object
-        match = text.match(/\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/m)
-        match&.[](0)
+        # Find first { and try to parse valid JSON from it
+        start = text.index('{')
+        return nil unless start
+
+        # Walk backwards from end looking for matching }
+        text.length.downto(start + 1) do |i|
+          next unless text[i - 1] == '}'
+          candidate = text[start...i]
+          begin
+            Oj.load(candidate) # validate it parses
+            return candidate
+          rescue Oj::ParseError
+            next
+          end
+        end
+        nil
       end
     end
   end

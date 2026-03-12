@@ -5,6 +5,8 @@ module Txcontext
     # Writer that updates comment: parameters in Swift localization calls
     # Supports NSLocalizedString, String(localized:), Text(), and custom functions
     class SwiftWriter
+      include Helpers
+
       # Default patterns for Swift localization functions
       # Each pattern should capture: (prefix)(key)(middle)(comment_value)(suffix)
       DEFAULT_FUNCTIONS = %w[
@@ -64,20 +66,6 @@ module Txcontext
       end
 
       private
-
-      def find_swift_files(path)
-        if File.file?(path) && path.end_with?(".swift")
-          [path]
-        elsif File.directory?(path)
-          Dir.glob(File.join(path, "**", "*.swift"))
-        else
-          []
-        end
-      end
-
-      def skip_description?(description)
-        description.include?("No usage found") || description.include?("Processing failed")
-      end
 
       # Update comment for a specific key in the content
       def update_comment_for_key(content, key, description)

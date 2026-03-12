@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "open3"
+
 module Txcontext
   # Parses git diff to extract changed translation keys
   class GitDiff
@@ -39,8 +41,8 @@ module Txcontext
 
     def git_diff_for_file(path)
       # Use triple-dot to get changes on current branch since it diverged from base
-      cmd = "git diff #{@base_ref.shellescape}...HEAD -- #{path.shellescape} 2>/dev/null"
-      `#{cmd}`
+      stdout, _stderr, status = Open3.capture3("git", "diff", "#{@base_ref}...HEAD", "--", path)
+      status.success? ? stdout : ""
     end
 
     def extract_keys_from_diff(diff_output, path)

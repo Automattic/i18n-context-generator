@@ -164,7 +164,7 @@ module Txcontext
         # Processing options
         processing:
           concurrency: 5
-          context_lines: 20
+          context_lines: 15
           max_matches_per_key: 3
 
         # Output configuration

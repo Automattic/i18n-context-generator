@@ -19,7 +19,7 @@ module Txcontext
       @provider = attrs[:provider] || "anthropic"
       @model = attrs[:model]
       @concurrency = attrs[:concurrency] || 5
-      @context_lines = attrs[:context_lines] || 20
+      @context_lines = attrs[:context_lines] || 15
       @max_matches_per_key = attrs[:max_matches_per_key] || 3
       @output_path = attrs.key?(:output_path) ? attrs[:output_path] : nil
       @output_format = attrs[:output_format] || "csv"
@@ -59,7 +59,7 @@ module Txcontext
         provider: yaml.dig("llm", "provider") || "anthropic",
         model: yaml.dig("llm", "model"),
         concurrency: yaml.dig("processing", "concurrency") || 5,
-        context_lines: yaml.dig("processing", "context_lines") || 20,
+        context_lines: yaml.dig("processing", "context_lines") || 15,
         max_matches_per_key: yaml.dig("processing", "max_matches_per_key") || 3,
         output_path: yaml.dig("output", "path"),
         output_format: yaml.dig("output", "format") || "csv",
@@ -92,7 +92,7 @@ module Txcontext
         provider: options[:provider] || "anthropic",
         model: options[:model],
         concurrency: options[:concurrency] || 5,
-        context_lines: 20,
+        context_lines: 15,
         max_matches_per_key: 3,
         output_path: options[:output],
         output_format: options[:format] || "csv",
@@ -110,15 +110,15 @@ module Txcontext
     end
 
     def merge_cli(options)
-      @no_cache = options[:no_cache] if options[:no_cache]
-      @dry_run = options[:dry_run] if options[:dry_run]
+      @no_cache = options[:no_cache] if options.key?(:no_cache)
+      @dry_run = options[:dry_run] if options.key?(:dry_run)
       @key_filter = options[:keys] if options[:keys]
       @output_path = options[:output] if options[:output]
       @provider = options[:provider] if options[:provider]
       @model = options[:model] if options[:model]
       @concurrency = options[:concurrency] if options[:concurrency]
-      @write_back = options[:write_back] if options[:write_back]
-      @write_back_to_code = options[:write_back_to_code] if options[:write_back_to_code]
+      @write_back = options[:write_back] if options.key?(:write_back)
+      @write_back_to_code = options[:write_back_to_code] if options.key?(:write_back_to_code)
       @diff_base = options[:diff_base] if options[:diff_base]
       @context_prefix = options[:context_prefix] if options.key?(:context_prefix)
       @context_mode = options[:context_mode] if options[:context_mode]
@@ -144,7 +144,15 @@ module Txcontext
         "**/dist/**",
         "**/*.min.js",
         "**/*.test.*",
-        "**/*.spec.*"
+        "**/*.spec.*",
+        "**/Pods/**",
+        "**/Carthage/**",
+        "**/.build/**",
+        "**/DerivedData/**",
+        "**/*Tests.swift",
+        "**/*Tests.kt",
+        "**/*Test.java",
+        "**/*Test.kt"
       ]
     end
   end
