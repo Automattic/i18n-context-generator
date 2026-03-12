@@ -14,7 +14,6 @@ module Txcontext
 
     # Patterns that indicate false positive matches (not actual localization usage)
     FALSE_POSITIVE_PATTERNS = [
-      /\.\w+\(\s*\)/,          # Method calls like .apply(), .close(), .clear()
       /==\s*["']/,             # String comparisons like == "yes"
       /["']\s*==/,             # String comparisons like "yes" ==
       /!=\s*["']/,             # String comparisons like != "no"

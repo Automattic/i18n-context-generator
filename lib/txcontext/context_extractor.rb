@@ -221,27 +221,34 @@ module Txcontext
     end
 
     def process_entry(entry)
-      # Check cache first
-      if (cached = cache.get(entry.key, entry.text))
-        return ExtractionResult.new(**cached.transform_keys(&:to_sym))
-      end
-
-      # Search for key usage in code
+      # Search for key usage in code first — needed for both cache key and LLM prompt
       matches = searcher.search(entry.key)
 
       if matches.empty?
-        result = ExtractionResult.new(
+        return ExtractionResult.new(
           key: entry.key,
           text: entry.text,
           description: 'No usage found in source code',
           locations: []
         )
-        cache.set(entry.key, entry.text, result.to_h)
-        return result
       end
 
       # Limit matches to avoid huge prompts
       matches = matches.first(@config.max_matches_per_key)
+
+      # Build a cache context digest from all prompt-shaping inputs so the cache
+      # invalidates when source code, comments, or model change
+      comment = entry.metadata&.dig(:comment)
+      cache_ctx = [
+        matches.map { |m| "#{m.file}:#{m.line}:#{m.match_line}:#{m.enclosing_scope}:#{m.context}" }.sort.join("\0"),
+        "comment:#{comment}",
+        "model:#{@config.model}"
+      ].join("\n")
+
+      # Check cache with match context included
+      if (cached = cache.get(entry.key, entry.text, context: cache_ctx))
+        return ExtractionResult.new(**cached.transform_keys(&:to_sym))
+      end
 
       # Get context from LLM
       llm_result = llm.generate_context(
@@ -263,7 +270,7 @@ module Txcontext
         error: llm_result.error
       )
 
-      cache.set(entry.key, entry.text, result.to_h)
+      cache.set(entry.key, entry.text, result.to_h, context: cache_ctx)
       result
     end
 

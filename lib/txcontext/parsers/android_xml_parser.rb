@@ -15,7 +15,7 @@ module Txcontext
 
         doc.elements.each('resources/string') do |element|
           key = element.attributes['name']
-          text = element.text || ''
+          text = inner_text(element)
 
           # Look for preceding comment
           comment = find_preceding_comment(element)
@@ -34,7 +34,7 @@ module Txcontext
           array_element.elements.to_a('item').each_with_index do |item, index|
             entries << TranslationEntry.new(
               key: "#{array_name}[#{index}]",
-              text: unescape_android_string(item.text || ''),
+              text: unescape_android_string(inner_text(item)),
               source_file: path,
               metadata: { array: array_name, index: index }
             )
@@ -48,7 +48,7 @@ module Txcontext
             quantity = item.attributes['quantity']
             entries << TranslationEntry.new(
               key: "#{plural_name}:#{quantity}",
-              text: unescape_android_string(item.text || ''),
+              text: unescape_android_string(inner_text(item)),
               source_file: path,
               metadata: { plural: plural_name, quantity: quantity }
             )
@@ -59,6 +59,15 @@ module Txcontext
       end
 
       private
+
+      # Get the full inner content of an element, including inline markup like
+      # <b>, <i>, <u>, <xliff:g>. REXML::Element#text only returns the first
+      # text node, losing everything after a nested element.
+      def inner_text(element)
+        element.children.map { |child|
+          child.is_a?(REXML::Text) ? child.value : child.to_s
+        }.join
+      end
 
       def find_preceding_comment(element)
         # Look at the previous sibling

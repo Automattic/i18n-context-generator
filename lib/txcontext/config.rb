@@ -122,10 +122,13 @@ module Txcontext
     # Thor options without defaults are nil when not passed, so this
     # correctly preserves config-file values for unspecified flags.
     def merge_cli(options)
+      @translations = options[:translations].split(',').map(&:strip) if options[:translations]
+      @source_paths = options[:source].split(',').map(&:strip) if options[:source]
       @no_cache = !options[:cache] unless options[:cache].nil?
       @dry_run = options[:dry_run] unless options[:dry_run].nil?
       @key_filter = options[:keys] if options[:keys]
       @output_path = options[:output] if options[:output]
+      @output_format = options[:format] if options[:format]
       @provider = options[:provider] if options[:provider]
       @model = options[:model] if options[:model]
       @concurrency = options[:concurrency] if options[:concurrency]

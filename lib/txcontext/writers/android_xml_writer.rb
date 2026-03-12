@@ -27,7 +27,9 @@ module Txcontext
           # Only write comments on <string> elements, not <plurals> or <string-array>.
           # Plural/array parent comments would use a single child's description which
           # is misleading for the resource as a whole.
-          if (match = line.match(%r{^(\s*)<string\s+name="([^"]+)"[^>]*>.*</string>\s*$}))
+          # Match the opening <string name="..."> tag — works for both single-line and
+          # multi-line string elements.
+          if (match = line.match(/^(\s*)<string\s+name="([^"]+)"/))
             indent = match[1]
             key = match[2]
             result = results_by_key[key]

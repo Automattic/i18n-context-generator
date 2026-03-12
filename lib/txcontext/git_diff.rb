@@ -52,7 +52,7 @@ module Txcontext
       when '.strings'
         extract_strings_keys(diff_output)
       when '.xml'
-        extract_xml_keys(diff_output)
+        extract_xml_keys(diff_output, path)
       else
         Set.new
       end
@@ -74,40 +74,83 @@ module Txcontext
       keys
     end
 
-    # Extract keys from Android strings.xml diff
-    # Looks for added/changed lines for <string>, <plurals>, and <string-array> resources.
-    # Tracks parent element context so changed <item> lines inside plurals/arrays
-    # are attributed to their parent resource name.
-    def extract_xml_keys(diff_output)
+    # Extract keys from Android strings.xml diff.
+    # Tracks parent element context from diff lines and uses hunk headers to
+    # map added lines to file positions. When an added <item> can't be attributed
+    # to a parent from diff context alone (e.g. large plural/array blocks where the
+    # opener isn't in the hunk), falls back to reading the actual file.
+    def extract_xml_keys(diff_output, file_path)
       keys = Set.new
       current_parent = nil
+      file_line = nil
+      orphaned_item_file_lines = []
 
       diff_output.each_line do |line|
-        # Strip diff prefix to get the content for context tracking.
-        # Context lines have ' ' or no prefix, added lines '+', removed lines '-'.
+        # Parse hunk header to track position in new file
+        if (hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          file_line = hunk[1].to_i
+          next
+        end
+
+        # Skip diff metadata lines
+        next if line.start_with?('diff ', 'index ', '--- ', '+++ ')
+
+        is_removed = line.start_with?('-')
+        is_added = line.start_with?('+')
         content = line.sub(/^[ +-]/, '')
 
-        # Track parent element from any line (context, added, or removed)
+        # Track parent element from any visible line (context, added, or removed)
         if content =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
           current_parent = Regexp.last_match(1)
         elsif content =~ %r{</(?:plurals|string-array)>}
           current_parent = nil
         end
 
-        # Only process added lines for key extraction
-        next unless line.start_with?('+') && !line.start_with?('++')
+        # Process added lines for key extraction
+        if is_added
+          keys << Regexp.last_match(1) if content =~ /<string\s+name=["']([^"']+)["']/
+          keys << Regexp.last_match(1) if content =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
 
-        # Direct <string> element
-        keys << Regexp.last_match(1) if line =~ /^\+.*<string\s+name=["']([^"']+)["']/
+          if content =~ /^\s*<item[\s>]/
+            if current_parent
+              keys << current_parent
+            elsif file_line
+              orphaned_item_file_lines << file_line
+            end
+          end
+        end
 
-        # Opening <plurals> or <string-array> tag
-        keys << Regexp.last_match(1) if line =~ /^\+.*<(?:plurals|string-array)\s+name=["']([^"']+)["']/
-
-        # Changed <item> inside a plural or array — attribute to parent
-        keys << current_parent if current_parent && line =~ /^\+\s*<item[\s>]/
+        # Context and added lines exist in new file; removed lines do not
+        file_line += 1 if file_line && !is_removed
       end
 
+      # Resolve orphaned items by reading the actual file
+      resolve_orphaned_items(keys, orphaned_item_file_lines, file_path)
+
       keys
+    end
+
+    # Build a map of file line numbers to enclosing plural/array resource names,
+    # then use it to attribute orphaned <item> additions to their parent.
+    def resolve_orphaned_items(keys, orphaned_lines, file_path)
+      return if orphaned_lines.empty? || !File.exist?(file_path)
+
+      current_parent = nil
+      parent_at_line = {}
+
+      File.readlines(file_path).each_with_index do |line, index|
+        if line =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
+          current_parent = Regexp.last_match(1)
+        elsif line =~ %r{</(?:plurals|string-array)>}
+          current_parent = nil
+        end
+        parent_at_line[index + 1] = current_parent
+      end
+
+      orphaned_lines.each do |line_num|
+        parent = parent_at_line[line_num]
+        keys << parent if parent
+      end
     end
   end
 end
