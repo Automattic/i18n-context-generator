@@ -16,26 +16,25 @@ module Txcontext
         ext = File.extname(path).downcase
 
         case ext
-        when ".json"
+        when '.json'
           JsonParser.new
-        when ".yml", ".yaml"
+        when '.yml', '.yaml'
           YamlParser.new
-        when ".strings"
+        when '.strings'
           StringsParser.new
-        when ".xml"
+        when '.xml'
           # Check if it's an Android strings.xml
-          if basename == "strings.xml" || path.include?("/res/values")
-            AndroidXmlParser.new
-          else
-            raise Error, "Unsupported XML format: #{path} (only Android strings.xml is supported)"
-          end
+          raise Error, "Unsupported XML format: #{path} (only Android strings.xml is supported)" unless basename == 'strings.xml' || path.include?('/res/values')
+
+          AndroidXmlParser.new
+
         else
           raise Error, "Unsupported translation file format: #{path}"
         end
       end
 
       def parse(path)
-        raise NotImplementedError, "Subclasses must implement #parse"
+        raise NotImplementedError, 'Subclasses must implement #parse'
       end
 
       protected
@@ -43,14 +42,14 @@ module Txcontext
       # Flatten nested hashes: {"a" => {"b" => "c"}} -> {"a.b" => "c"}
       def flatten_keys(hash, prefix = nil)
         hash.each_with_object({}) do |(key, value), result|
-          full_key = [prefix, key].compact.join(".")
+          full_key = [prefix, key].compact.join('.')
 
           case value
           when Hash
             result.merge!(flatten_keys(value, full_key))
           when Array
             # Handle arrays (e.g., pluralization)
-            result[full_key] = value.join(" | ")
+            result[full_key] = value.join(' | ')
           else
             result[full_key] = value
           end

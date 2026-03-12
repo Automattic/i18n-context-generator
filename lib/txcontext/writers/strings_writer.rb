@@ -7,7 +7,7 @@ module Txcontext
     class StringsWriter
       include Helpers
 
-      def initialize(context_prefix: "Context: ", context_mode: "replace")
+      def initialize(context_prefix: 'Context: ', context_mode: 'replace')
         @context_prefix = context_prefix
         @context_mode = context_mode
       end
@@ -48,10 +48,7 @@ module Txcontext
       def build_comment(existing_comment, context_description)
         context_line = "#{@context_prefix}#{context_description}"
 
-        if existing_comment.nil? || existing_comment.empty?
-          context_line
-        elsif @context_mode == "replace"
-          # Replace entire comment with new context
+        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
           context_line
         elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
           # Replace existing context line (idempotent update)

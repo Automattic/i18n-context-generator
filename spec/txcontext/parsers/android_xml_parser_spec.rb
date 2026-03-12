@@ -3,10 +3,10 @@
 RSpec.describe Txcontext::Parsers::AndroidXmlParser do
   subject(:parser) { described_class.new }
 
-  let(:strings_xml) { File.join(android_fixtures_path, "res", "values", "strings.xml") }
+  let(:strings_xml) { File.join(android_fixtures_path, 'res', 'values', 'strings.xml') }
 
-  describe "#parse" do
-    it "returns an array of TranslationEntry objects" do
+  describe '#parse' do
+    it 'returns an array of TranslationEntry objects' do
       entries = parser.parse(strings_xml)
 
       expect(entries).to be_an(Array)
@@ -14,46 +14,46 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
       expect(entries.first).to be_a(Txcontext::Parsers::TranslationEntry)
     end
 
-    it "extracts string keys correctly" do
+    it 'extracts string keys correctly' do
       entries = parser.parse(strings_xml)
       keys = entries.map(&:key)
 
-      expect(keys).to include("app_name")
-      expect(keys).to include("common_save")
-      expect(keys).to include("settings_title")
+      expect(keys).to include('app_name')
+      expect(keys).to include('common_save')
+      expect(keys).to include('settings_title')
     end
 
-    it "extracts text values correctly" do
+    it 'extracts text values correctly' do
       entries = parser.parse(strings_xml)
-      save_entry = entries.find { |e| e.key == "common_save" }
+      save_entry = entries.find { |e| e.key == 'common_save' }
 
-      expect(save_entry.text).to eq("Save")
+      expect(save_entry.text).to eq('Save')
     end
 
-    it "unescapes Android string escapes" do
+    it 'unescapes Android string escapes' do
       entries = parser.parse(strings_xml)
-      unauthorized = entries.find { |e| e.key == "error_unauthorized" }
+      unauthorized = entries.find { |e| e.key == 'error_unauthorized' }
 
       # Should unescape \' to '
       expect(unauthorized.text).to include("don't")
     end
 
-    it "preserves format specifiers" do
+    it 'preserves format specifiers' do
       entries = parser.parse(strings_xml)
-      comments = entries.find { |e| e.key == "post_comments" }
+      comments = entries.find { |e| e.key == 'post_comments' }
 
-      expect(comments.text).to eq("%d comments")
+      expect(comments.text).to eq('%d comments')
     end
 
-    it "handles positional format specifiers" do
+    it 'handles positional format specifiers' do
       entries = parser.parse(strings_xml)
-      format_example = entries.find { |e| e.key == "compose_format_example" }
+      format_example = entries.find { |e| e.key == 'compose_format_example' }
 
-      expect(format_example.text).to include("%1$d")
-      expect(format_example.text).to include("%2$s")
+      expect(format_example.text).to include('%1$d')
+      expect(format_example.text).to include('%2$s')
     end
 
-    it "includes source file in entry" do
+    it 'includes source file in entry' do
       entries = parser.parse(strings_xml)
 
       entries.each do |entry|
@@ -62,49 +62,49 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
     end
   end
 
-  describe "plurals parsing" do
-    it "parses plural resources" do
+  describe 'plurals parsing' do
+    it 'parses plural resources' do
       entries = parser.parse(strings_xml)
-      plural_keys = entries.select { |e| e.key.start_with?("post_likes_count:") }
+      plural_keys = entries.select { |e| e.key.start_with?('post_likes_count:') }
 
       expect(plural_keys).not_to be_empty
     end
 
-    it "creates entries for each quantity" do
+    it 'creates entries for each quantity' do
       entries = parser.parse(strings_xml)
 
-      one_entry = entries.find { |e| e.key == "post_likes_count:one" }
-      other_entry = entries.find { |e| e.key == "post_likes_count:other" }
+      one_entry = entries.find { |e| e.key == 'post_likes_count:one' }
+      other_entry = entries.find { |e| e.key == 'post_likes_count:other' }
 
       expect(one_entry).not_to be_nil
-      expect(one_entry.text).to eq("%d like")
+      expect(one_entry.text).to eq('%d like')
       expect(other_entry).not_to be_nil
-      expect(other_entry.text).to eq("%d likes")
+      expect(other_entry.text).to eq('%d likes')
     end
 
-    it "includes plural metadata" do
+    it 'includes plural metadata' do
       entries = parser.parse(strings_xml)
-      one_entry = entries.find { |e| e.key == "post_likes_count:one" }
+      one_entry = entries.find { |e| e.key == 'post_likes_count:one' }
 
-      expect(one_entry.metadata[:plural]).to eq("post_likes_count")
-      expect(one_entry.metadata[:quantity]).to eq("one")
+      expect(one_entry.metadata[:plural]).to eq('post_likes_count')
+      expect(one_entry.metadata[:quantity]).to eq('one')
     end
   end
 
-  describe "edge cases" do
-    it "handles empty strings.xml" do
-      empty_file = File.join(Dir.tmpdir, "empty_strings.xml")
+  describe 'edge cases' do
+    it 'handles empty strings.xml' do
+      empty_file = File.join(Dir.tmpdir, 'empty_strings.xml')
       File.write(empty_file, '<?xml version="1.0" encoding="utf-8"?><resources></resources>')
 
       entries = parser.parse(empty_file)
 
       expect(entries).to eq([])
     ensure
-      File.delete(empty_file) if File.exist?(empty_file)
+      FileUtils.rm_f(empty_file)
     end
 
-    it "handles strings with XML entities" do
-      file_with_entities = File.join(Dir.tmpdir, "entities_strings.xml")
+    it 'handles strings with XML entities' do
+      file_with_entities = File.join(Dir.tmpdir, 'entities_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <resources>
@@ -115,13 +115,13 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
 
       entries = parser.parse(file_with_entities)
 
-      expect(entries.first.text).to eq("Hello & World <test>")
+      expect(entries.first.text).to eq('Hello & World <test>')
     ensure
-      File.delete(file_with_entities) if File.exist?(file_with_entities)
+      FileUtils.rm_f(file_with_entities)
     end
 
-    it "handles empty string values" do
-      file_with_empty = File.join(Dir.tmpdir, "empty_value_strings.xml")
+    it 'handles empty string values' do
+      file_with_empty = File.join(Dir.tmpdir, 'empty_value_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <resources>
@@ -132,15 +132,15 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
 
       entries = parser.parse(file_with_empty)
 
-      expect(entries.first.text).to eq("")
+      expect(entries.first.text).to eq('')
     ensure
-      File.delete(file_with_empty) if File.exist?(file_with_empty)
+      FileUtils.rm_f(file_with_empty)
     end
 
-    it "handles translatable=false attribute" do
-      # Note: This depends on whether the parser filters these out
+    it 'handles translatable=false attribute' do
+      # NOTE: This depends on whether the parser filters these out
       # Currently it doesn't, but this documents the behavior
-      file_with_translatable = File.join(Dir.tmpdir, "translatable_strings.xml")
+      file_with_translatable = File.join(Dir.tmpdir, 'translatable_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <resources>
@@ -153,17 +153,17 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
       entries = parser.parse(file_with_translatable)
       keys = entries.map(&:key)
 
-      expect(keys).to include("translatable_key")
+      expect(keys).to include('translatable_key')
       # Current behavior: non-translatable strings are still parsed
-      expect(keys).to include("not_translatable")
+      expect(keys).to include('not_translatable')
     ensure
-      File.delete(file_with_translatable) if File.exist?(file_with_translatable)
+      FileUtils.rm_f(file_with_translatable)
     end
   end
 
-  describe "string arrays" do
-    it "parses string-array resources" do
-      file_with_array = File.join(Dir.tmpdir, "array_strings.xml")
+  describe 'string arrays' do
+    it 'parses string-array resources' do
+      file_with_array = File.join(Dir.tmpdir, 'array_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <resources>
@@ -178,18 +178,18 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
 
       entries = parser.parse(file_with_array)
 
-      expect(entries.map(&:key)).to include("days_of_week[0]")
-      expect(entries.map(&:key)).to include("days_of_week[1]")
-      expect(entries.map(&:key)).to include("days_of_week[2]")
+      expect(entries.map(&:key)).to include('days_of_week[0]')
+      expect(entries.map(&:key)).to include('days_of_week[1]')
+      expect(entries.map(&:key)).to include('days_of_week[2]')
 
-      monday = entries.find { |e| e.key == "days_of_week[0]" }
-      expect(monday.text).to eq("Monday")
+      monday = entries.find { |e| e.key == 'days_of_week[0]' }
+      expect(monday.text).to eq('Monday')
     ensure
-      File.delete(file_with_array) if File.exist?(file_with_array)
+      FileUtils.rm_f(file_with_array)
     end
 
-    it "includes array metadata" do
-      file_with_array = File.join(Dir.tmpdir, "array_meta_strings.xml")
+    it 'includes array metadata' do
+      file_with_array = File.join(Dir.tmpdir, 'array_meta_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
         <resources>
@@ -203,10 +203,10 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
       entries = parser.parse(file_with_array)
       entry = entries.first
 
-      expect(entry.metadata[:array]).to eq("colors")
+      expect(entry.metadata[:array]).to eq('colors')
       expect(entry.metadata[:index]).to eq(0)
     ensure
-      File.delete(file_with_array) if File.exist?(file_with_array)
+      FileUtils.rm_f(file_with_array)
     end
   end
 end

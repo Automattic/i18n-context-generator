@@ -15,7 +15,7 @@ module Txcontext
         Text(
       ].freeze
 
-      def initialize(functions: nil, context_prefix: "Context: ", context_mode: "replace")
+      def initialize(functions: nil, context_prefix: 'Context: ', context_mode: 'replace')
         @functions = functions || DEFAULT_FUNCTIONS
         @context_prefix = context_prefix
         @context_mode = context_mode
@@ -87,15 +87,15 @@ module Txcontext
 
       def build_pattern_for_function(func, escaped_key)
         case func
-        when "NSLocalizedString"
+        when 'NSLocalizedString'
           # NSLocalizedString("key", comment: "...")
           # NSLocalizedString("key", value: "...", comment: "...")
           # NSLocalizedString("key", tableName: "...", comment: "...")
           /NSLocalizedString\(\s*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
-        when "String(localized:"
+        when 'String(localized:'
           # String(localized: "key", comment: "...")
           /String\(\s*localized:\s*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
-        when "Text("
+        when 'Text('
           # Text("key", comment: "...")
           # Text(LocalizedStringKey("key"), comment: "...")
           /Text\([^)]*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
@@ -106,9 +106,9 @@ module Txcontext
         end
       end
 
-      def update_match(match, func, key, new_comment)
+      def update_match(match, _func, _key, new_comment)
         # Replace the comment value while preserving the rest of the call
-        match.gsub(/comment:\s*"([^"]*)"/) do |comment_match|
+        match.gsub(/comment:\s*"([^"]*)"/) do |_comment_match|
           existing_comment = Regexp.last_match(1)
           final_comment = build_final_comment(existing_comment, new_comment)
           "comment: \"#{escape_swift_string(final_comment)}\""
@@ -118,10 +118,7 @@ module Txcontext
       def build_final_comment(existing_comment, new_context)
         context_line = "#{@context_prefix}#{new_context}"
 
-        if existing_comment.nil? || existing_comment.empty?
-          context_line
-        elsif @context_mode == "replace"
-          # Replace entire comment
+        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
           context_line
         elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
           # Update existing context line (idempotent)
@@ -133,10 +130,10 @@ module Txcontext
       end
 
       def escape_swift_string(str)
-        str.gsub("\\", "\\\\")
+        str.gsub('\\', '\\\\')
            .gsub('"', '\\"')
-           .gsub("\n", "\\n")
-           .gsub("\t", "\\t")
+           .gsub("\n", '\\n')
+           .gsub("\t", '\\t')
       end
     end
   end

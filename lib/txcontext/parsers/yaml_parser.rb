@@ -2,9 +2,10 @@
 
 module Txcontext
   module Parsers
+    # Parses YAML translation files (including Rails i18n style) into TranslationEntry objects.
     class YamlParser < Base
       def parse(path)
-        data = YAML.load_file(path)
+        data = YAML.safe_load_file(path, permitted_classes: [])
 
         # Skip top-level locale key if present (Rails i18n style)
         # e.g., { "en" => { "hello" => "Hello" } } -> { "hello" => "Hello" }

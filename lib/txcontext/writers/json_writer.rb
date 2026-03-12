@@ -2,6 +2,7 @@
 
 module Txcontext
   module Writers
+    # Writes extraction results to a JSON file.
     class JsonWriter
       def write(results, path)
         output = {

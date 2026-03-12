@@ -1,11 +1,11 @@
 # frozen_string_literal: true
 
-require "open3"
+require 'open3'
 
 module Txcontext
   # Parses git diff to extract changed translation keys
   class GitDiff
-    def initialize(base_ref: "main")
+    def initialize(base_ref: 'main')
       @base_ref = base_ref
     end
 
@@ -29,29 +29,29 @@ module Txcontext
 
     # Check if we're in a git repository
     def self.available?
-      system("git rev-parse --git-dir > /dev/null 2>&1")
+      system('git rev-parse --git-dir > /dev/null 2>&1')
     end
 
     # Check if the base ref exists
     def base_ref_exists?
-      system("git rev-parse --verify #{@base_ref.shellescape} > /dev/null 2>&1")
+      system('git', 'rev-parse', '--verify', @base_ref, out: File::NULL, err: File::NULL)
     end
 
     private
 
     def git_diff_for_file(path)
       # Use triple-dot to get changes on current branch since it diverged from base
-      stdout, _stderr, status = Open3.capture3("git", "diff", "#{@base_ref}...HEAD", "--", path)
-      status.success? ? stdout : ""
+      stdout, _stderr, status = Open3.capture3('git', 'diff', "#{@base_ref}...HEAD", '--', path)
+      status.success? ? stdout : ''
     end
 
     def extract_keys_from_diff(diff_output, path)
       ext = File.extname(path).downcase
 
       case ext
-      when ".strings"
+      when '.strings'
         extract_strings_keys(diff_output)
-      when ".xml"
+      when '.xml'
         extract_xml_keys(diff_output)
       else
         Set.new
@@ -65,40 +65,46 @@ module Txcontext
 
       diff_output.each_line do |line|
         # Match added or modified lines (start with +, not ++)
-        next unless line.start_with?("+") && !line.start_with?("++")
+        next unless line.start_with?('+') && !line.start_with?('++')
 
         # Extract key from: "key" = "value";
-        if line =~ /^\+\s*"([^"]+)"\s*=/
-          keys << Regexp.last_match(1)
-        end
+        keys << Regexp.last_match(1) if line =~ /^\+\s*"([^"]+)"\s*=/
       end
 
       keys
     end
 
     # Extract keys from Android strings.xml diff
-    # Looks for added lines like: <string name="key">value</string>
+    # Looks for added/changed lines for <string>, <plurals>, and <string-array> resources.
+    # Tracks parent element context so changed <item> lines inside plurals/arrays
+    # are attributed to their parent resource name.
     def extract_xml_keys(diff_output)
       keys = Set.new
+      current_parent = nil
 
       diff_output.each_line do |line|
-        # Match added or modified lines
-        next unless line.start_with?("+") && !line.start_with?("++")
+        # Strip diff prefix to get the content for context tracking.
+        # Context lines have ' ' or no prefix, added lines '+', removed lines '-'.
+        content = line.sub(/^[ +-]/, '')
 
-        # Extract name from: <string name="key">
-        if line =~ /^\+.*<string\s+name=["']([^"']+)["']/
-          keys << Regexp.last_match(1)
+        # Track parent element from any line (context, added, or removed)
+        if content =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
+          current_parent = Regexp.last_match(1)
+        elsif content =~ %r{</(?:plurals|string-array)>}
+          current_parent = nil
         end
 
-        # Also handle string-array items by parent name
-        if line =~ /^\+.*<string-array\s+name=["']([^"']+)["']/
-          keys << Regexp.last_match(1)
-        end
+        # Only process added lines for key extraction
+        next unless line.start_with?('+') && !line.start_with?('++')
 
-        # Handle plurals
-        if line =~ /^\+.*<plurals\s+name=["']([^"']+)["']/
-          keys << Regexp.last_match(1)
-        end
+        # Direct <string> element
+        keys << Regexp.last_match(1) if line =~ /^\+.*<string\s+name=["']([^"']+)["']/
+
+        # Opening <plurals> or <string-array> tag
+        keys << Regexp.last_match(1) if line =~ /^\+.*<(?:plurals|string-array)\s+name=["']([^"']+)["']/
+
+        # Changed <item> inside a plural or array — attribute to parent
+        keys << current_parent if current_parent && line =~ /^\+\s*<item[\s>]/
       end
 
       keys

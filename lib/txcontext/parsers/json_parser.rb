@@ -2,6 +2,7 @@
 
 module Txcontext
   module Parsers
+    # Parses flat or nested JSON translation files into TranslationEntry objects.
     class JsonParser < Base
       def parse(path)
         data = Oj.load_file(path)

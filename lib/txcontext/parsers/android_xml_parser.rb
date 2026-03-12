@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require "rexml/document"
+require 'rexml/document'
 
 module Txcontext
   module Parsers
@@ -9,13 +9,13 @@ module Txcontext
     # With optional comment: <!-- comment --> <string name="key">value</string>
     class AndroidXmlParser < Base
       def parse(path)
-        content = File.read(path, encoding: "UTF-8")
+        content = File.read(path, encoding: 'UTF-8')
         doc = REXML::Document.new(content)
         entries = []
 
-        doc.elements.each("resources/string") do |element|
-          key = element.attributes["name"]
-          text = element.text || ""
+        doc.elements.each('resources/string') do |element|
+          key = element.attributes['name']
+          text = element.text || ''
 
           # Look for preceding comment
           comment = find_preceding_comment(element)
@@ -29,12 +29,12 @@ module Txcontext
         end
 
         # Also parse string arrays
-        doc.elements.each("resources/string-array") do |array_element|
-          array_name = array_element.attributes["name"]
-          array_element.elements.to_a("item").each_with_index do |item, index|
+        doc.elements.each('resources/string-array') do |array_element|
+          array_name = array_element.attributes['name']
+          array_element.elements.to_a('item').each_with_index do |item, index|
             entries << TranslationEntry.new(
               key: "#{array_name}[#{index}]",
-              text: unescape_android_string(item.text || ""),
+              text: unescape_android_string(item.text || ''),
               source_file: path,
               metadata: { array: array_name, index: index }
             )
@@ -42,13 +42,13 @@ module Txcontext
         end
 
         # Also parse plurals
-        doc.elements.each("resources/plurals") do |plural_element|
-          plural_name = plural_element.attributes["name"]
-          plural_element.elements.each("item") do |item|
-            quantity = item.attributes["quantity"]
+        doc.elements.each('resources/plurals') do |plural_element|
+          plural_name = plural_element.attributes['name']
+          plural_element.elements.each('item') do |item|
+            quantity = item.attributes['quantity']
             entries << TranslationEntry.new(
               key: "#{plural_name}:#{quantity}",
-              text: unescape_android_string(item.text || ""),
+              text: unescape_android_string(item.text || ''),
               source_file: path,
               metadata: { plural: plural_name, quantity: quantity }
             )
@@ -70,6 +70,7 @@ module Txcontext
             # Hit another element, stop looking
             return nil
           end
+
           prev = prev.previous_sibling
         end
         nil
@@ -80,10 +81,10 @@ module Txcontext
         str
           .gsub("\\'", "'")
           .gsub('\\"', '"')
-          .gsub("\\n", "\n")
-          .gsub("\\t", "\t")
-          .gsub("\\@", "@")
-          .gsub("\\?", "?")
+          .gsub('\\n', "\n")
+          .gsub('\\t', "\t")
+          .gsub('\\@', '@')
+          .gsub('\\?', '?')
       end
     end
   end

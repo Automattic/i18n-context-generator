@@ -1,8 +1,11 @@
 # frozen_string_literal: true
 
 module Txcontext
+  # File-based cache for LLM results, keyed by translation key and source context.
   class Cache
-    CACHE_DIR = ".txcontext-cache"
+    CACHE_DIR = '.txcontext-cache'
+    # Bump this when prompt format, search heuristics, or output schema change
+    CACHE_VERSION = 'v2'
 
     def initialize(enabled: true)
       @enabled = enabled
@@ -15,10 +18,9 @@ module Txcontext
       path = cache_path(key, text)
       return nil unless File.exist?(path)
 
-      data = Oj.load_file(path, symbol_keys: true)
+      Oj.load_file(path, symbol_keys: true)
 
       # Return the cached data as a hash (will be converted to ExtractionResult by caller)
-      data
     rescue StandardError => e
       warn "Cache read error for #{key}: #{e.message}"
       nil
@@ -40,8 +42,8 @@ module Txcontext
     private
 
     def cache_path(key, text)
-      # Include both key and text in hash to invalidate when text changes
-      hash = Digest::MD5.hexdigest("#{key}:#{text}")
+      # Include version, key, and text in hash to invalidate when any change
+      hash = Digest::MD5.hexdigest("#{CACHE_VERSION}:#{key}:#{text}")
       File.join(CACHE_DIR, "#{hash}.json")
     end
   end

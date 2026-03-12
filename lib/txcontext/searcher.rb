@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
-require 'set'
 require 'find'
 
 module Txcontext
+  # Finds where translation keys are used in iOS and Android source code.
   class Searcher
     # Represents a code match with surrounding context
     Match = Data.define(:file, :line, :match_line, :context, :enclosing_scope) do
@@ -188,13 +188,9 @@ module Txcontext
     def extract_enclosing_scope(lines, match_index)
       match_index.downto(0) do |i|
         line = lines[i]
-        if line =~ /\b(func|class|struct|enum|protocol)\s+(\w+)/
-          return "#{$1} #{$2}"
-        end
+        return "#{::Regexp.last_match(1)} #{::Regexp.last_match(2)}" if line =~ /\b(func|class|struct|enum|protocol)\s+(\w+)/
         # Android/Kotlin patterns
-        if line =~ /\b(fun|class|object)\s+(\w+)/
-          return "#{$1} #{$2}"
-        end
+        return "#{::Regexp.last_match(1)} #{::Regexp.last_match(2)}" if line =~ /\b(fun|class|object)\s+(\w+)/
       end
       nil
     end
@@ -203,10 +199,8 @@ module Txcontext
       start_idx = [0, match_index - @context_lines].max
       end_idx = [lines.length - 1, match_index + @context_lines].min
 
-      context_parts = []
-
-      (start_idx..end_idx).each do |i|
-        context_parts << (i == match_index ? ">>> #{lines[i]}" : lines[i])
+      context_parts = (start_idx..end_idx).map do |i|
+        (i == match_index ? ">>> #{lines[i]}" : lines[i])
       end
 
       context_parts.join("\n")
@@ -226,6 +220,13 @@ module Txcontext
       pattern_strings.map { |p| Regexp.new(p) }
     end
 
+    # Extract the base resource name from composite Android keys
+    # e.g., "post_likes_count:one" -> "post_likes_count"
+    #        "days_of_week[0]"     -> "days_of_week"
+    def android_base_key(key)
+      key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
+    end
+
     # Patterns that indicate the start of a localization function call
     # Used for multi-line matching when the key is on a different line
     IOS_FUNCTION_OPENERS = [
@@ -234,6 +235,7 @@ module Txcontext
       /LocalizedStringKey\s*\(\s*$/,
       /Text\s*\(\s*$/
     ].freeze
+    private_constant :IOS_FUNCTION_OPENERS
 
     def build_ios_patterns(key)
       escaped = Regexp.escape(key)
@@ -253,27 +255,43 @@ module Txcontext
     end
 
     def build_android_patterns(key)
-      # Android keys use underscores, not dots typically
-      escaped = Regexp.escape(key)
-      [
-        # R.string.key_name - standard pattern
-        "R\\.string\\.#{escaped}\\b",
-        # @string/key_name in XML layouts
-        "@string/#{escaped}\\b",
-        # getString(R.string.key_name)
-        "getString\\s*\\(\\s*R\\.string\\.#{escaped}",
-        # context.getString(R.string.key_name)
-        "\\.getString\\s*\\(\\s*R\\.string\\.#{escaped}",
-        # stringResource(R.string.key_name) - Jetpack Compose
-        "stringResource\\s*\\(\\s*R\\.string\\.#{escaped}",
-        # Static import pattern: string.key_name (from `import ...R.string`)
-        # Match when preceded by (, ,, =, or whitespace to avoid false positives
-        "[\\(\\s,=]string\\.#{escaped}\\b",
-        # getString(string.key_name) - with static import
-        "getString\\s*\\(\\s*string\\.#{escaped}",
-        # stringResource(string.key_name) - Jetpack Compose with static import
-        "stringResource\\s*\\(\\s*string\\.#{escaped}"
-      ]
+      base = android_base_key(key)
+      escaped_base = Regexp.escape(base)
+
+      if key =~ /:[a-z]+$/
+        # Plural key (e.g., "post_likes_count:one") — search by base name in plural resources
+        [
+          "R\\.plurals\\.#{escaped_base}\\b",
+          "@plurals/#{escaped_base}\\b",
+          "getQuantityString\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
+          "\\.getQuantityString\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
+          "pluralStringResource\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
+          "[\\(\\s,=]plurals\\.#{escaped_base}\\b"
+        ]
+      elsif key =~ /\[\d+\]$/
+        # Array key (e.g., "days_of_week[0]") — search by base name in array resources
+        [
+          "R\\.array\\.#{escaped_base}\\b",
+          "@array/#{escaped_base}\\b",
+          "getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
+          "\\.getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
+          "resources\\.getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
+          "[\\(\\s,=]array\\.#{escaped_base}\\b"
+        ]
+      else
+        # Standard string key
+        escaped = Regexp.escape(key)
+        [
+          "R\\.string\\.#{escaped}\\b",
+          "@string/#{escaped}\\b",
+          "getString\\s*\\(\\s*R\\.string\\.#{escaped}",
+          "\\.getString\\s*\\(\\s*R\\.string\\.#{escaped}",
+          "stringResource\\s*\\(\\s*R\\.string\\.#{escaped}",
+          "[\\(\\s,=]string\\.#{escaped}\\b",
+          "getString\\s*\\(\\s*string\\.#{escaped}",
+          "stringResource\\s*\\(\\s*string\\.#{escaped}"
+        ]
+      end
     end
 
     def filter_matches(matches, key)

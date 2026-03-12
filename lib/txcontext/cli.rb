@@ -1,14 +1,15 @@
 # frozen_string_literal: true
 
-require "thor"
+require 'thor'
 
 module Txcontext
+  # Thor-based CLI entry point for the txcontext command.
   class CLI < Thor
     def self.exit_on_failure?
       true
     end
 
-    desc "extract", "Extract translation context from source code"
+    desc 'extract', 'Extract translation context from source code'
     long_desc <<~DESC
       Analyzes source code to extract contextual information for translation keys.
       Uses AI to understand how strings are used in the UI and generates descriptions
@@ -27,24 +28,28 @@ module Txcontext
         # Use config file
         txcontext extract --config .txcontext.yml
     DESC
-    option :config, aliases: "-c", desc: "Path to config file (.txcontext.yml)"
-    option :translations, aliases: "-t", desc: "Translation file(s), comma-separated"
-    option :source, aliases: "-s", desc: "Source directory(ies) to search, comma-separated"
-    option :output, aliases: "-o", desc: "Output file path (CSV written only if specified)"
-    option :format, aliases: "-f", default: "csv", enum: %w[csv json], desc: "Output format"
-    option :provider, aliases: "-p", default: "anthropic", enum: %w[anthropic], desc: "LLM provider"
-    option :model, aliases: "-m", desc: "LLM model to use"
-    option :keys, aliases: "-k", desc: "Filter keys (comma-separated patterns, supports * wildcard)"
-    option :concurrency, type: :numeric, default: 5, desc: "Number of concurrent requests"
-    option :dry_run, type: :boolean, default: false, desc: "Show what would be processed without calling LLM"
-    option :cache, type: :boolean, default: false, desc: "Enable caching of LLM results"
-    option :write_back, type: :boolean, default: false, desc: "Write context back to source translation files (.strings, strings.xml)"
-    option :write_back_to_code, type: :boolean, default: false, desc: "Write context back to Swift source code comment: parameters"
-    option :diff_base, type: :string, desc: "Only process keys changed since this git ref (e.g., main, origin/main)"
-    option :context_prefix, type: :string, default: "Context: ", desc: "Prefix for context comments (use empty string for no prefix)"
-    option :context_mode, type: :string, default: "replace", enum: %w[replace append], desc: "How to handle existing comments: replace or append"
-    option :start_key, type: :string, desc: "Start processing from this key (inclusive)"
-    option :end_key, type: :string, desc: "Stop processing at this key (inclusive)"
+    option :config, aliases: '-c', desc: 'Path to config file (.txcontext.yml)'
+    option :translations, aliases: '-t', desc: 'Translation file(s), comma-separated'
+    option :source, aliases: '-s', desc: 'Source directory(ies) to search, comma-separated'
+    option :output, aliases: '-o', desc: 'Output file path (CSV written only if specified)'
+    option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (default: csv)'
+    option :provider, aliases: '-p', enum: %w[anthropic], desc: 'LLM provider (default: anthropic)'
+    option :model, aliases: '-m', desc: 'LLM model to use'
+    option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
+    option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
+    option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
+    option :cache, type: :boolean, desc: 'Enable caching of LLM results'
+    option :write_back, type: :boolean,
+                        desc: 'Write context back to source translation files (.strings, strings.xml)'
+    option :write_back_to_code, type: :boolean,
+                                desc: 'Write context back to Swift source code comment: parameters'
+    option :diff_base, type: :string, desc: 'Only process keys changed since this git ref (e.g., main, origin/main)'
+    option :context_prefix, type: :string,
+                            desc: 'Prefix for context comments (default: "Context: ", use empty string for none)'
+    option :context_mode, type: :string, enum: %w[replace append],
+                          desc: 'How to handle existing comments: replace or append (default: replace)'
+    option :start_key, type: :string, desc: 'Start processing from this key (inclusive)'
+    option :end_key, type: :string, desc: 'Stop processing at this key (inclusive)'
 
     def extract
       validate_options!
@@ -62,14 +67,14 @@ module Txcontext
       exit 130
     end
 
-    desc "init", "Create a sample config file"
-    option :force, type: :boolean, default: false, desc: "Overwrite existing config"
+    desc 'init', 'Create a sample config file'
+    option :force, type: :boolean, default: false, desc: 'Overwrite existing config'
 
     def init
-      config_path = ".txcontext.yml"
+      config_path = '.txcontext.yml'
 
       if File.exist?(config_path) && !options[:force]
-        say_error "Config file already exists. Use --force to overwrite."
+        say_error 'Config file already exists. Use --force to overwrite.'
         exit 1
       end
 
@@ -77,7 +82,7 @@ module Txcontext
       say "Created #{config_path}"
     end
 
-    desc "version", "Show version"
+    desc 'version', 'Show version'
     def version
       say "txcontext #{VERSION}"
     end
@@ -89,19 +94,19 @@ module Txcontext
     def validate_options!
       return if options[:config] && File.exist?(options[:config])
 
-      unless options[:translations]
-        say_error "Error: --translations (-t) is required unless using a config file"
-        exit 1
-      end
+      return if options[:translations]
+
+      say_error 'Error: --translations (-t) is required unless using a config file'
+      exit 1
     end
 
     def validate_api_key!
       return if options[:dry_run]
 
-      provider = options[:provider] || "anthropic"
+      provider = options[:provider] || 'anthropic'
       env_var = case provider
-                when "anthropic" then "ANTHROPIC_API_KEY"
-                when "openai" then "OPENAI_API_KEY"
+                when 'anthropic' then 'ANTHROPIC_API_KEY'
+                when 'openai' then 'OPENAI_API_KEY'
                 else "#{provider.upcase}_API_KEY"
                 end
 
@@ -114,20 +119,20 @@ module Txcontext
 
     def validate_diff_base!
       unless GitDiff.available?
-        say_error "Error: --diff-base requires a git repository"
+        say_error 'Error: --diff-base requires a git repository'
         exit 1
       end
 
       git_diff = GitDiff.new(base_ref: options[:diff_base])
-      unless git_diff.base_ref_exists?
-        say_error "Error: git ref '#{options[:diff_base]}' not found"
-        say_error "Try: origin/main, main, or a specific commit SHA"
-        exit 1
-      end
+      return if git_diff.base_ref_exists?
+
+      say_error "Error: git ref '#{options[:diff_base]}' not found"
+      say_error 'Try: origin/main, main, or a specific commit SHA'
+      exit 1
     end
 
     def say_error(message)
-      $stderr.puts message
+      warn message
     end
 
     def sample_config

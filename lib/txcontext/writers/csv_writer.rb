@@ -2,11 +2,12 @@
 
 module Txcontext
   module Writers
+    # Writes extraction results to a CSV file.
     class CsvWriter
       HEADERS = %w[key text description ui_element tone max_length locations error].freeze
 
       def write(results, path)
-        CSV.open(path, "w") do |csv|
+        CSV.open(path, 'w') do |csv|
           csv << HEADERS
 
           results.sort_by(&:key).each do |result|
@@ -17,7 +18,7 @@ module Txcontext
               result.ui_element,
               result.tone,
               result.max_length,
-              result.locations.join(";"),
+              result.locations.join(';'),
               result.error
             ]
           end

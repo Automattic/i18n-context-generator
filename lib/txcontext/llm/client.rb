@@ -13,19 +13,19 @@ module Txcontext
     class Client
       def self.for(provider)
         case provider.to_s.downcase
-        when "anthropic"
+        when 'anthropic'
           Anthropic.new
-        when "openai"
-          raise Error, "OpenAI provider not yet implemented"
-        when "ollama"
-          raise Error, "Ollama provider not yet implemented"
+        when 'openai'
+          raise Error, 'OpenAI provider not yet implemented'
+        when 'ollama'
+          raise Error, 'Ollama provider not yet implemented'
         else
           raise Error, "Unknown LLM provider: #{provider}"
         end
       end
 
       def generate_context(key:, text:, matches:, model: nil, comment: nil)
-        raise NotImplementedError, "Subclasses must implement #generate_context"
+        raise NotImplementedError, 'Subclasses must implement #generate_context'
       end
 
       protected
@@ -86,22 +86,22 @@ module Txcontext
       end
 
       def detect_platform(matches)
-        return "mobile" if matches.empty?
+        return 'mobile' if matches.empty?
 
         extensions = matches.map { |m| File.extname(m.file).downcase }
 
-        if extensions.any? { |e| [".swift", ".m", ".mm"].include?(e) }
-          "iOS"
-        elsif extensions.any? { |e| [".kt", ".java"].include?(e) }
-          "Android"
+        if extensions.any? { |e| ['.swift', '.m', '.mm'].include?(e) }
+          'iOS'
+        elsif extensions.any? { |e| ['.kt', '.java'].include?(e) }
+          'Android'
         else
-          "mobile"
+          'mobile'
         end
       end
 
       def format_matches(matches)
         matches.map.with_index do |match, i|
-          scope_info = match.enclosing_scope ? " (in #{match.enclosing_scope})" : ""
+          scope_info = match.enclosing_scope ? " (in #{match.enclosing_scope})" : ''
           <<~MATCH
             ### Match #{i + 1}: #{match.file}:#{match.line}#{scope_info}
             ```
@@ -120,12 +120,12 @@ module Txcontext
         descriptions = []
         # Also gather the raw matches for display
         raw = text.scan(/%(?:\d+\$)?[#0 +'.-]*\d*(?:\.\d+)?(?:l{0,2}|h{0,2})?[diouxXeEfFgGaAcsSpn@]/)
-        raw.each_with_index do |placeholder, i|
+        raw.each_with_index do |placeholder, _i|
           type_hint = case placeholder
-                      when /%.*[di]/ then "a number"
-                      when /%.*[fFeEgGaA]/ then "a decimal number"
-                      when /%.*[@sS]/ then "a string value"
-                      else "a value"
+                      when /%.*[di]/ then 'a number'
+                      when /%.*[fFeEgGaA]/ then 'a decimal number'
+                      when /%.*[@sS]/ then 'a string value'
+                      else 'a value'
                       end
           descriptions << "#{placeholder} — #{type_hint}"
         end
@@ -135,7 +135,10 @@ module Txcontext
       end
 
       def parse_response(text)
-        return ContextResult.new(description: "Failed to parse response", error: "Empty response") if text.nil? || text.empty?
+        if text.nil? || text.empty?
+          return ContextResult.new(description: 'Failed to parse response',
+                                   error: 'Empty response')
+        end
 
         # Try to extract JSON from the response
         json_text = extract_json(text)
@@ -144,7 +147,7 @@ module Txcontext
         data = Oj.load(json_text, symbol_keys: true)
 
         ContextResult.new(
-          description: data[:description] || "No description provided",
+          description: data[:description] || 'No description provided',
           ui_element: data[:ui_element],
           tone: data[:tone],
           max_length: data[:max_length]
@@ -156,7 +159,7 @@ module Txcontext
       def extract_json(text)
         # Try to find JSON object in the response
         # Handle both raw JSON and markdown-wrapped JSON
-        if text.include?("```")
+        if text.include?('```')
           match = text.match(/```(?:json)?\s*(\{[^`]+\})\s*```/m)
           return match[1] if match
         end
@@ -168,6 +171,7 @@ module Txcontext
         # Walk backwards from end looking for matching }
         text.length.downto(start + 1) do |i|
           next unless text[i - 1] == '}'
+
           candidate = text[start...i]
           begin
             Oj.load(candidate) # validate it parses

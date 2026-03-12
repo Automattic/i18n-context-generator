@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 module Txcontext
+  # Main orchestrator that parses translation files, searches source code for usages,
+  # sends context to the LLM, and writes results via the configured writer.
   class ContextExtractor
     include Writers::Helpers
 
@@ -49,7 +51,7 @@ module Txcontext
         if @config.diff_base
           puts "No changed translation keys found since #{@config.diff_base}."
         else
-          puts "No translation entries found."
+          puts 'No translation entries found.'
         end
         return
       end
@@ -59,7 +61,7 @@ module Txcontext
 
       if @config.dry_run
         puts "\nDry run - would process these keys:"
-        entries.first(20).each { |e| puts "  - #{e.key}: #{e.text.truncate(50)}" }
+        entries.first(20).each { |e| puts "  - #{e.key}: #{truncate(e.text, 50)}" }
         puts "  ... and #{entries.size - 20} more" if entries.size > 20
         return
       end
@@ -71,13 +73,9 @@ module Txcontext
         puts "\nWrote #{@results.size} results to #{@config.output_path}"
       end
 
-      if @config.write_back
-        write_back_to_source
-      end
+      write_back_to_source if @config.write_back
 
-      if @config.write_back_to_code
-        write_back_to_code
-      end
+      write_back_to_code if @config.write_back_to_code
 
       puts "Errors: #{@errors.size}" if @errors.any?
     end
@@ -113,8 +111,9 @@ module Txcontext
     end
 
     def filter_entries(entries)
-      patterns = @config.key_filter.split(",").map do |pattern|
-        Regexp.new("^#{pattern.strip.gsub('*', '.*')}$")
+      patterns = @config.key_filter.split(',').map do |pattern|
+        escaped = Regexp.escape(pattern.strip).gsub('\*', '.*')
+        Regexp.new("^#{escaped}$")
       end
 
       entries.select do |entry|
@@ -133,7 +132,16 @@ module Txcontext
 
       puts "Found #{changed_keys.size} changed keys in git diff"
 
-      entries.select { |entry| changed_keys.include?(entry.key) }
+      entries.select do |entry|
+        changed_keys.include?(entry.key) || changed_keys.include?(android_base_key(entry.key))
+      end
+    end
+
+    # Extract the base resource name from composite Android keys
+    # e.g., "post_likes_count:one" -> "post_likes_count"
+    #        "days_of_week[0]"     -> "days_of_week"
+    def android_base_key(key)
+      key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
     end
 
     def filter_by_range(entries)
@@ -171,7 +179,7 @@ module Txcontext
       $stdout.sync = true
 
       progress = TTY::ProgressBar.new(
-        "[:bar] :current/:total :percent :eta :key",
+        '[:bar] :current/:total :percent :eta :key',
         total: entries.size,
         width: 30,
         output: $stdout
@@ -180,13 +188,13 @@ module Txcontext
       # Use a thread pool for concurrent processing
       pool = Concurrent::FixedThreadPool.new(@config.concurrency)
       semaphore = Concurrent::Semaphore.new(@config.concurrency)
-      current_key = Concurrent::AtomicReference.new("")
+      current_key = Concurrent::AtomicReference.new('')
 
       entries.each do |entry|
         pool.post do
           semaphore.acquire
           begin
-            current_key.set(entry.key.truncate(40))
+            current_key.set(truncate(entry.key, 40))
             result = process_entry(entry)
             @results << result
             @errors << result if result.error
@@ -195,7 +203,7 @@ module Txcontext
             result = ExtractionResult.new(
               key: entry.key,
               text: entry.text,
-              description: "Processing failed",
+              description: 'Processing failed',
               error: e.message
             )
             @results << result
@@ -225,7 +233,7 @@ module Txcontext
         result = ExtractionResult.new(
           key: entry.key,
           text: entry.text,
-          description: "No usage found in source code",
+          description: 'No usage found in source code',
           locations: []
         )
         cache.set(entry.key, entry.text, result.to_h)
@@ -261,7 +269,7 @@ module Txcontext
 
     def write_output
       writer = case @config.output_format.to_s.downcase
-               when "json"
+               when 'json'
                  Writers::JsonWriter.new
                else
                  Writers::CsvWriter.new
@@ -303,7 +311,7 @@ module Txcontext
         end
       end
 
-      puts "Updated #{updated_count} Swift files with context comments" if updated_count > 0
+      puts "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
     end
 
     def source_writer_for(path)
@@ -311,32 +319,25 @@ module Txcontext
       ext = File.extname(path).downcase
 
       case ext
-      when ".strings"
+      when '.strings'
         Writers::StringsWriter.new(
           context_prefix: @config.context_prefix,
           context_mode: @config.context_mode
         )
-      when ".xml"
-        if basename == "strings.xml" || path.include?("/res/values")
+      when '.xml'
+        if basename == 'strings.xml' || path.include?('/res/values')
           Writers::AndroidXmlWriter.new(
             context_prefix: @config.context_prefix,
             context_mode: @config.context_mode
           )
         end
-      else
-        nil # No write-back support for other formats
       end
     end
-  end
-end
 
-# Add truncate method if not available
-unless String.method_defined?(:truncate)
-  class String
-    def truncate(length, omission: "...")
-      return self if self.length <= length
+    def truncate(str, length, omission: '...')
+      return str if str.length <= length
 
-      "#{self[0, length - omission.length]}#{omission}"
+      "#{str[0, length - omission.length]}#{omission}"
     end
   end
 end
