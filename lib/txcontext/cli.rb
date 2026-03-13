@@ -163,7 +163,7 @@ module Txcontext
         # LLM configuration
         llm:
           provider: anthropic
-          model: claude-sonnet-4-20250514
+          model: claude-sonnet-4-6-20250610
           # API key is read from ANTHROPIC_API_KEY environment variable
 
         # Processing options
