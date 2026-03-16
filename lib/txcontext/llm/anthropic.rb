@@ -5,7 +5,7 @@ module Txcontext
     # Claude API implementation of the LLM client with retry logic for rate limits.
     class Anthropic < Client
       API_URL = 'https://api.anthropic.com/v1/messages'
-      DEFAULT_MODEL = 'claude-sonnet-4-6-20250610'
+      DEFAULT_MODEL = 'claude-sonnet-4-6-20250514'
 
       def initialize
         super
