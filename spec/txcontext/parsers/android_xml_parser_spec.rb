@@ -138,8 +138,6 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
     end
 
     it 'handles translatable=false attribute' do
-      # NOTE: This depends on whether the parser filters these out
-      # Currently it doesn't, but this documents the behavior
       file_with_translatable = File.join(Dir.tmpdir, 'translatable_strings.xml')
       content = <<~XML
         <?xml version="1.0" encoding="utf-8"?>
@@ -154,10 +152,39 @@ RSpec.describe Txcontext::Parsers::AndroidXmlParser do
       keys = entries.map(&:key)
 
       expect(keys).to include('translatable_key')
-      # Current behavior: non-translatable strings are still parsed
-      expect(keys).to include('not_translatable')
+      expect(keys).not_to include('not_translatable')
     ensure
       FileUtils.rm_f(file_with_translatable)
+    end
+
+    it 'skips non-translatable plurals and string arrays' do
+      file_with_non_translatable_collections = File.join(Dir.tmpdir, 'non_translatable_collections.xml')
+      content = <<~XML
+        <?xml version="1.0" encoding="utf-8"?>
+        <resources>
+            <plurals name="visible_count">
+                <item quantity="one">%d visible item</item>
+            </plurals>
+            <plurals name="hidden_count" translatable="false">
+                <item quantity="one">%d hidden item</item>
+            </plurals>
+            <string-array name="visible_days">
+                <item>Monday</item>
+            </string-array>
+            <string-array name="hidden_days" translatable="false">
+                <item>Tuesday</item>
+            </string-array>
+        </resources>
+      XML
+      File.write(file_with_non_translatable_collections, content)
+
+      entries = parser.parse(file_with_non_translatable_collections)
+      keys = entries.map(&:key)
+
+      expect(keys).to include('visible_count:one', 'visible_days[0]')
+      expect(keys).not_to include('hidden_count:one', 'hidden_days[0]')
+    ensure
+      FileUtils.rm_f(file_with_non_translatable_collections)
     end
   end
 

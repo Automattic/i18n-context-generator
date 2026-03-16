@@ -14,6 +14,8 @@ module Txcontext
         entries = []
 
         doc.elements.each('resources/string') do |element|
+          next unless translatable?(element)
+
           key = element.attributes['name']
           text = inner_text(element)
 
@@ -30,6 +32,8 @@ module Txcontext
 
         # Also parse string arrays
         doc.elements.each('resources/string-array') do |array_element|
+          next unless translatable?(array_element)
+
           array_name = array_element.attributes['name']
           array_element.elements.to_a('item').each_with_index do |item, index|
             entries << TranslationEntry.new(
@@ -43,6 +47,8 @@ module Txcontext
 
         # Also parse plurals
         doc.elements.each('resources/plurals') do |plural_element|
+          next unless translatable?(plural_element)
+
           plural_name = plural_element.attributes['name']
           plural_element.elements.each('item') do |item|
             quantity = item.attributes['quantity']
@@ -64,9 +70,9 @@ module Txcontext
       # <b>, <i>, <u>, <xliff:g>. REXML::Element#text only returns the first
       # text node, losing everything after a nested element.
       def inner_text(element)
-        element.children.map { |child|
+        element.children.map do |child|
           child.is_a?(REXML::Text) ? child.value : child.to_s
-        }.join
+        end.join
       end
 
       def find_preceding_comment(element)
@@ -83,6 +89,10 @@ module Txcontext
           prev = prev.previous_sibling
         end
         nil
+      end
+
+      def translatable?(element)
+        element.attributes['translatable']&.downcase != 'false'
       end
 
       # Unescape Android string escapes
