@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'json'
+require 'net/http'
+
 module Txcontext
   module LLM
     # Result from LLM context generation
@@ -11,12 +14,14 @@ module Txcontext
 
     # Base class for LLM clients
     class Client
+      SYSTEM_PROMPT = 'You are a mobile app localization expert. Analyze code usage and provide concise, specific context for translators. Respond with only valid JSON.'
+
       def self.for(provider)
         case provider.to_s.downcase
         when 'anthropic'
           Anthropic.new
         when 'openai'
-          raise Error, 'OpenAI provider not yet implemented'
+          OpenAI.new
         when 'ollama'
           raise Error, 'Ollama provider not yet implemented'
         else
@@ -164,7 +169,7 @@ module Txcontext
         json_text = extract_json(text)
         return ContextResult.new(description: text.strip, error: nil) unless json_text
 
-        data = Oj.load(json_text, symbol_keys: true)
+        data = JSON.parse(json_text, symbolize_names: true)
 
         ContextResult.new(
           description: data[:description] || 'No description provided',
@@ -172,7 +177,7 @@ module Txcontext
           tone: data[:tone],
           max_length: data[:max_length]
         )
-      rescue Oj::ParseError => e
+      rescue JSON::ParserError => e
         ContextResult.new(description: text.strip, error: "JSON parse error: #{e.message}")
       end
 
@@ -194,13 +199,28 @@ module Txcontext
 
           candidate = text[start...i]
           begin
-            Oj.load(candidate) # validate it parses
+            JSON.parse(candidate) # validate it parses
             return candidate
-          rescue Oj::ParseError
+          rescue JSON::ParserError
             next
           end
         end
         nil
+      end
+
+      def post_json(uri:, headers:, body:, open_timeout: 10, read_timeout: 60)
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == 'https'
+        http.open_timeout = open_timeout
+        http.read_timeout = read_timeout
+
+        request = Net::HTTP::Post.new(
+          uri.request_uri,
+          { 'Content-Type' => 'application/json' }.merge(headers)
+        )
+        request.body = JSON.generate(body)
+
+        http.request(request)
       end
     end
   end

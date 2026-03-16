@@ -33,7 +33,7 @@ module Txcontext
     option :source, aliases: '-s', desc: 'Source directory(ies) to search, comma-separated'
     option :output, aliases: '-o', desc: 'Output file path (CSV written only if specified)'
     option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (default: csv)'
-    option :provider, aliases: '-p', enum: %w[anthropic], desc: 'LLM provider (default: anthropic)'
+    option :provider, aliases: '-p', enum: %w[anthropic openai], desc: 'LLM provider (default: anthropic)'
     option :model, aliases: '-m', desc: 'LLM model to use'
     option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
     option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
@@ -170,7 +170,8 @@ module Txcontext
         llm:
           provider: anthropic
           model: claude-sonnet-4-6-20250610
-          # API key is read from ANTHROPIC_API_KEY environment variable
+          # API key is read from the matching provider env var
+          # (ANTHROPIC_API_KEY or OPENAI_API_KEY)
 
         # Processing options
         processing:

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'time'
+
 module Txcontext
   module Writers
     # Writes extraction results to a JSON file.

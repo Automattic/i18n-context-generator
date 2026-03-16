@@ -2,21 +2,30 @@
 
 module Txcontext
   module LLM
-    # Claude API implementation of the LLM client with retry logic for rate limits.
-    class Anthropic < Client
-      API_URL = 'https://api.anthropic.com/v1/messages'
-      ANTHROPIC_VERSION = '2023-06-01'
-      DEFAULT_MODEL = 'claude-sonnet-4-6-20250514'
+    # OpenAI Responses API implementation of the LLM client.
+    class OpenAI < Client
+      API_URL = 'https://api.openai.com/v1/responses'
+      DEFAULT_MODEL = 'gpt-5-mini'
+      MAX_RETRIES = 2
+      RESPONSE_SCHEMA = {
+        type: 'object',
+        additionalProperties: false,
+        required: %w[description ui_element tone max_length],
+        properties: {
+          description: { type: 'string' },
+          ui_element: { type: %w[string null], enum: %w[button label title alert toast placeholder navigation menu tab error confirmation other] + [nil] },
+          tone: { type: %w[string null], enum: %w[formal casual urgent friendly technical neutral] + [nil] },
+          max_length: { type: %w[integer null] }
+        }
+      }.freeze
 
       def initialize
         super
-        @api_key = ENV.fetch('ANTHROPIC_API_KEY', nil)
-        raise Error, 'ANTHROPIC_API_KEY environment variable is required' unless @api_key
+        @api_key = ENV.fetch('OPENAI_API_KEY', nil)
+        raise Error, 'OPENAI_API_KEY environment variable is required' unless @api_key
 
         @uri = URI(API_URL)
       end
-
-      MAX_RETRIES = 2
 
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
                            include_file_paths: false, redact_prompts: true)
@@ -34,7 +43,6 @@ module Txcontext
         loop do
           response = post_request(model: model, prompt: prompt)
 
-          # Retry on rate limit with backoff
           if response.code.to_i == 429 && retries < MAX_RETRIES
             retries += 1
             delay = (response['retry-after']&.to_i || 2) * retries
@@ -54,14 +62,22 @@ module Txcontext
         post_json(
           uri: @uri,
           headers: {
-            'anthropic-version' => ANTHROPIC_VERSION,
-            'x-api-key' => @api_key
+            'Authorization' => "Bearer #{@api_key}"
           },
           body: {
             model: model,
-            max_tokens: 500,
-            system: SYSTEM_PROMPT,
-            messages: [{ role: 'user', content: prompt }]
+            store: false,
+            instructions: SYSTEM_PROMPT,
+            input: prompt,
+            max_output_tokens: 500,
+            text: {
+              format: {
+                type: 'json_schema',
+                name: 'translation_context',
+                strict: true,
+                schema: RESPONSE_SCHEMA
+              }
+            }
           }
         )
       end
@@ -70,8 +86,7 @@ module Txcontext
         case response.code.to_i
         when 200
           body = JSON.parse(response.body)
-          content = body.dig('content', 0, 'text')
-          parse_response(content)
+          parse_response(extract_output_text(body))
         when 429
           ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
         when 401
@@ -82,9 +97,15 @@ module Txcontext
           rescue StandardError
             {}
           end
-          error_msg = error_body.dig('error', 'message') || "HTTP #{response.code}"
+          error_msg = error_body.dig('error', 'message') || error_body['message'] || "HTTP #{response.code}"
           ContextResult.new(description: 'API error', error: error_msg)
         end
+      end
+
+      def extract_output_text(body)
+        output_item = Array(body['output']).find { |item| item['type'] == 'message' }
+        content_item = Array(output_item&.[]('content')).find { |item| item['type'] == 'output_text' }
+        content_item&.dig('text')
       end
     end
   end

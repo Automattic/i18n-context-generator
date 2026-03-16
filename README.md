@@ -6,7 +6,7 @@ A CLI tool that extracts contextual information from mobile app source code to i
 
 - **iOS Support**: Parses `.strings` files and searches Swift/Objective-C code
 - **Android Support**: Parses `strings.xml` files and searches Kotlin/Java code
-- **AI-Powered Context**: Uses Claude or other LLMs to understand UI context
+- **AI-Powered Context**: Uses Anthropic or OpenAI models to understand UI context
 - **Write-Back**: Optionally writes context comments back to source files
 - **Optional Caching**: Opt-in caching to avoid re-processing unchanged translations
 - **Prompt Privacy Controls**: Redacts likely secrets, URLs, and emails before sending prompts by default
@@ -22,13 +22,16 @@ chmod +x exe/txcontext
 ### Requirements
 
 - Ruby 3.1+
-- An Anthropic API key (or other supported LLM provider)
+- An API key for your selected LLM provider (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`)
 
 ## Quick Start
 
 ```bash
 # Set your API key
 export ANTHROPIC_API_KEY=your-api-key
+
+# Or use OpenAI
+# export OPENAI_API_KEY=your-api-key
 
 # iOS app
 bundle exec exe/txcontext extract \
@@ -65,7 +68,7 @@ Runs must target a single platform at a time. If a repository contains both iOS 
 -s, --source DIRS          Source directory(ies) to search, comma-separated
 -o, --output PATH          Output file path (CSV only written if specified)
 -f, --format FORMAT        Output format: csv or json (default: csv)
--p, --provider PROVIDER    LLM provider: anthropic (default: anthropic)
+-p, --provider PROVIDER    LLM provider: anthropic or openai (default: anthropic)
 -m, --model MODEL          LLM model to use
 -k, --keys PATTERNS        Filter keys (comma-separated patterns, supports * wildcard)
     --concurrency N        Number of concurrent requests (default: 5)
@@ -218,7 +221,7 @@ let title = NSLocalizedString("settings.title", comment: "Navigation bar title f
 
 1. **Parse**: Reads translation keys from `.strings` or `strings.xml` files
 2. **Search**: Scans source code to find where each key is used
-3. **Analyze**: Sends code context to Claude to understand UI usage
+3. **Analyze**: Sends code context to the selected LLM provider to understand UI usage
 4. **Output**: Writes context to CSV/JSON and optionally back to source files
 
 ## CI Integration

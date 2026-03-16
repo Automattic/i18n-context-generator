@@ -59,4 +59,37 @@ RSpec.describe Txcontext::LLM::Client do
     expect(prompt).to include('super-secret-value')
     expect(prompt).to include('https://internal.example.com/settings')
   end
+
+  describe '.for' do
+    it 'builds an Anthropic client' do
+      anthropic_client = instance_double(Txcontext::LLM::Anthropic)
+      allow(Txcontext::LLM::Anthropic).to receive(:new).and_return(anthropic_client)
+
+      expect(described_class.for('anthropic')).to eq(anthropic_client)
+    end
+
+    it 'builds an OpenAI client' do
+      openai_client = instance_double(Txcontext::LLM::OpenAI)
+      allow(Txcontext::LLM::OpenAI).to receive(:new).and_return(openai_client)
+
+      expect(described_class.for('openai')).to eq(openai_client)
+    end
+  end
+
+  it 'parses markdown-wrapped JSON responses' do
+    result = client.send(
+      :parse_response,
+      <<~TEXT
+        ```json
+        {"description":"Primary save action","ui_element":"button","tone":"neutral","max_length":12}
+        ```
+      TEXT
+    )
+
+    expect(result.description).to eq('Primary save action')
+    expect(result.ui_element).to eq('button')
+    expect(result.tone).to eq('neutral')
+    expect(result.max_length).to eq(12)
+    expect(result.error).to be_nil
+  end
 end
