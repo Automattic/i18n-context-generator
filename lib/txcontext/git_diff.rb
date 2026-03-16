@@ -42,8 +42,9 @@ module Txcontext
     def git_diff_for_file(path)
       # Run git from the directory containing the file so the correct repo is used
       dir = File.directory?(path) ? path : File.dirname(path)
+      pathspec = File.directory?(path) ? '.' : File.basename(path)
       # Use triple-dot to get changes on current branch since it diverged from base
-      stdout, _stderr, status = Open3.capture3('git', 'diff', "#{@base_ref}...HEAD", '--', path, chdir: dir)
+      stdout, _stderr, status = Open3.capture3('git', 'diff', "#{@base_ref}...HEAD", '--', pathspec, chdir: dir)
       status.success? ? stdout : ''
     end
 

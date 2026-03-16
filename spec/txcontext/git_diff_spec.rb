@@ -2,6 +2,32 @@
 
 RSpec.describe Txcontext::GitDiff do
   describe '#changed_keys' do
+    it 'detects changes for translation files in nested directories' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          system('git', 'init', '-q', '-b', 'main')
+          FileUtils.mkdir_p('ios/App/Resources')
+          path = File.join('ios', 'App', 'Resources', 'Localizable.strings')
+
+          File.write(path, "\"existing\" = \"Old\";\n")
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=txcontext', '-c', 'user.email=txcontext@example.com',
+                 'commit', '-q', '-m', 'Initial commit')
+          system('git', 'checkout', '-q', '-b', 'feature')
+
+          File.write(path, "\"existing\" = \"Updated\";\n\"new.key\" = \"New\";\n")
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=txcontext', '-c', 'user.email=txcontext@example.com',
+                 'commit', '-q', '-m', 'Update translations')
+
+          diff = described_class.new(base_ref: 'main')
+          keys = diff.changed_keys([path])
+
+          expect(keys).to include('existing', 'new.key')
+        end
+      end
+    end
+
     context 'with .strings diff' do
       it 'extracts added keys from .strings diff' do
         diff = described_class.new(base_ref: 'main')
@@ -149,7 +175,7 @@ RSpec.describe Txcontext::GitDiff do
       end
     end
 
-    context 'orphaned item resolution' do
+    context 'with orphaned item resolution' do
       it 'resolves orphaned items by reading the actual file' do
         diff = described_class.new(base_ref: 'main')
 
@@ -198,7 +224,7 @@ RSpec.describe Txcontext::GitDiff do
       end
     end
 
-    context 'hunk header parsing' do
+    context 'with hunk header parsing' do
       it 'tracks file line numbers correctly across hunks' do
         diff = described_class.new(base_ref: 'main')
 
