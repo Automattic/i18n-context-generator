@@ -42,6 +42,8 @@ module Txcontext
     end
 
     def run
+      PlatformValidator.new(@config).validate!
+
       entries = load_translations
       entries = filter_entries(entries) if @config.key_filter
       entries = filter_by_diff(entries) if @config.diff_base

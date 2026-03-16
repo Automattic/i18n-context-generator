@@ -53,6 +53,8 @@ bundle exec exe/txcontext extract \
 ```
 
 ## Usage
+Runs must target a single platform at a time. If a repository contains both iOS and Android code, run `txcontext` separately for each platform.
+
 
 ### CLI Options
 
@@ -93,14 +95,10 @@ translations:
   # iOS
   - path: ios/MyApp/Resources/Localizable.strings
 
-  # Android
-  - path: android/app/src/main/res/values/strings.xml
-
 # Source code directories to search
 source:
   paths:
     - ios/MyApp/
-    - android/app/src/main/java/
   ignore:
     - "**/Pods/**"
     - "**/build/**"
@@ -144,6 +142,8 @@ swift:
 | Android XML | `strings.xml` | Android |
 | JSON | `.json` | Cross-platform |
 | YAML | `.yml`, `.yaml` | Cross-platform |
+
+Use a separate config file or invocation for Android projects instead of combining iOS and Android paths in one run.
 
 ### Source Code
 
