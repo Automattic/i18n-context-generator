@@ -115,7 +115,7 @@ source:
 # LLM configuration
 llm:
   provider: anthropic
-  model: claude-sonnet-4-20250514
+  model: claude-sonnet-4-6
 
 # Processing options
 processing:

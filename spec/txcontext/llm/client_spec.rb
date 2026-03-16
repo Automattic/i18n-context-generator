@@ -68,6 +68,13 @@ RSpec.describe Txcontext::LLM::Client do
       expect(described_class.for('anthropic')).to eq(anthropic_client)
     end
 
+    it 'builds an Anthropic client from a symbol provider' do
+      anthropic_client = instance_double(Txcontext::LLM::Anthropic)
+      allow(Txcontext::LLM::Anthropic).to receive(:new).and_return(anthropic_client)
+
+      expect(described_class.for(:anthropic)).to eq(anthropic_client)
+    end
+
     it 'builds an OpenAI client' do
       openai_client = instance_double(Txcontext::LLM::OpenAI)
       allow(Txcontext::LLM::OpenAI).to receive(:new).and_return(openai_client)
