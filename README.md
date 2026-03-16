@@ -9,6 +9,7 @@ A CLI tool that extracts contextual information from mobile app source code to i
 - **AI-Powered Context**: Uses Claude or other LLMs to understand UI context
 - **Write-Back**: Optionally writes context comments back to source files
 - **Optional Caching**: Opt-in caching to avoid re-processing unchanged translations
+- **Prompt Privacy Controls**: Redacts likely secrets, URLs, and emails before sending prompts by default
 
 ## Installation
 
@@ -52,9 +53,9 @@ bundle exec exe/txcontext extract \
   --write-back
 ```
 
-## Usage
 Runs must target a single platform at a time. If a repository contains both iOS and Android code, run `txcontext` separately for each platform.
 
+## Usage
 
 ### CLI Options
 
@@ -75,6 +76,10 @@ Runs must target a single platform at a time. If a repository contains both iOS 
     --diff-base REF        Only process keys changed since this git ref (e.g., main, origin/main)
     --context-prefix TEXT  Prefix for context comments (default: "Context: ", use "" for none)
     --context-mode MODE    How to handle existing comments: replace or append (default: replace)
+    --include-file-paths   Include full source file paths in LLM prompts (default: false)
+    --include-translation-comments
+                          Include translation file comments in LLM prompts (default: true)
+    --redact-prompts       Redact likely secrets and PII from LLM prompts (default: true)
 ```
 
 ### Using a Config File
@@ -130,7 +135,15 @@ swift:
     - NSLocalizedString
     - "String(localized:"
     - "Text("
+
+# Prompt privacy controls
+privacy:
+  include_file_paths: false
+  include_translation_comments: true
+  redact_prompts: true
 ```
+
+Use a separate config file or invocation for Android projects instead of combining iOS and Android paths in one run.
 
 ## Supported Formats
 
@@ -142,8 +155,6 @@ swift:
 | Android XML | `strings.xml` | Android |
 | JSON | `.json` | Cross-platform |
 | YAML | `.yml`, `.yaml` | Cross-platform |
-
-Use a separate config file or invocation for Android projects instead of combining iOS and Android paths in one run.
 
 ### Source Code
 

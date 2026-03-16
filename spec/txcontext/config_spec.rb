@@ -19,6 +19,9 @@ RSpec.describe Txcontext::Config do
       expect(config.write_back).to be false
       expect(config.context_prefix).to eq('Context: ')
       expect(config.context_mode).to eq('replace')
+      expect(config.include_file_paths).to be false
+      expect(config.include_translation_comments).to be true
+      expect(config.redact_prompts).to be true
     end
 
     it 'accepts custom values' do
@@ -83,6 +86,11 @@ RSpec.describe Txcontext::Config do
           context_prefix: ""
           context_mode: append
 
+        privacy:
+          include_file_paths: true
+          include_translation_comments: false
+          redact_prompts: false
+
         prompt: |
           Custom prompt here
       YAML
@@ -113,6 +121,9 @@ RSpec.describe Txcontext::Config do
       expect(config.write_back).to be true
       expect(config.context_prefix).to eq('')
       expect(config.context_mode).to eq('append')
+      expect(config.include_file_paths).to be true
+      expect(config.include_translation_comments).to be false
+      expect(config.redact_prompts).to be false
     end
 
     it 'handles translations as hash with path key' do
@@ -145,7 +156,10 @@ RSpec.describe Txcontext::Config do
         write_back: true,
         diff_base: 'origin/main',
         context_prefix: 'Note: ',
-        context_mode: 'append'
+        context_mode: 'append',
+        include_file_paths: true,
+        include_translation_comments: false,
+        redact_prompts: false
       }
 
       config = described_class.from_cli(options)
@@ -164,6 +178,9 @@ RSpec.describe Txcontext::Config do
       expect(config.diff_base).to eq('origin/main')
       expect(config.context_prefix).to eq('Note: ')
       expect(config.context_mode).to eq('append')
+      expect(config.include_file_paths).to be true
+      expect(config.include_translation_comments).to be false
+      expect(config.redact_prompts).to be false
     end
 
     it 'uses defaults for missing options' do
@@ -211,10 +228,11 @@ RSpec.describe Txcontext::Config do
     it 'can set boolean options to false' do
       config = described_class.new(dry_run: true, write_back: true)
 
-      config.merge_cli(dry_run: false, write_back: false)
+      config.merge_cli(dry_run: false, write_back: false, redact_prompts: false)
 
       expect(config.dry_run).to be false
       expect(config.write_back).to be false
+      expect(config.redact_prompts).to be false
     end
   end
 

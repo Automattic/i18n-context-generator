@@ -24,9 +24,17 @@ module Txcontext
 
       MAX_RETRIES = 2
 
-      def generate_context(key:, text:, matches:, model: nil, comment: nil)
+      def generate_context(key:, text:, matches:, model: nil, comment: nil,
+                           include_file_paths: false, redact_prompts: true)
         model ||= DEFAULT_MODEL
-        prompt = build_prompt(key: key, text: text, matches: matches, comment: comment)
+        prompt = build_prompt(
+          key: key,
+          text: text,
+          matches: matches,
+          comment: comment,
+          include_file_paths: include_file_paths,
+          redact_prompts: redact_prompts
+        )
         retries = 0
 
         loop do

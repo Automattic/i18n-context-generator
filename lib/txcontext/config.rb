@@ -8,7 +8,8 @@ module Txcontext
                 :max_matches_per_key, :output_path, :output_format,
                 :no_cache, :dry_run, :key_filter, :write_back,
                 :swift_functions, :write_back_to_code, :diff_base, :context_prefix,
-                :context_mode, :start_key, :end_key
+                :context_mode, :start_key, :end_key, :include_file_paths,
+                :include_translation_comments, :redact_prompts
 
     DEFAULT_CONTEXT_PREFIX = 'Context: '
     DEFAULT_CONTEXT_MODE = 'replace' # "replace" or "append"
@@ -35,6 +36,9 @@ module Txcontext
       @context_mode = attrs[:context_mode] || DEFAULT_CONTEXT_MODE
       @start_key = attrs[:start_key]
       @end_key = attrs[:end_key]
+      @include_file_paths = attrs.key?(:include_file_paths) ? attrs[:include_file_paths] : false
+      @include_translation_comments = attrs.key?(:include_translation_comments) ? attrs[:include_translation_comments] : true
+      @redact_prompts = attrs.key?(:redact_prompts) ? attrs[:redact_prompts] : true
     end
 
     def default_swift_functions
@@ -72,6 +76,9 @@ module Txcontext
       # Only pass context_prefix when explicitly set in YAML, so initialize default applies
       prefix = yaml.dig('output', 'context_prefix')
       attrs[:context_prefix] = prefix unless prefix.nil?
+      attrs[:include_file_paths] = yaml.dig('privacy', 'include_file_paths') unless yaml.dig('privacy', 'include_file_paths').nil?
+      attrs[:include_translation_comments] = yaml.dig('privacy', 'include_translation_comments') unless yaml.dig('privacy', 'include_translation_comments').nil?
+      attrs[:redact_prompts] = yaml.dig('privacy', 'redact_prompts') unless yaml.dig('privacy', 'redact_prompts').nil?
 
       new(**attrs)
     end
@@ -100,7 +107,7 @@ module Txcontext
         max_matches_per_key: 3,
         output_path: options[:output],
         output_format: options[:format] || 'csv',
-        no_cache: options[:cache].nil? ? true : !options[:cache],
+        no_cache: options[:cache].nil? || !options[:cache],
         dry_run: options[:dry_run] || false,
         key_filter: options[:keys],
         write_back: options[:write_back] || false,
@@ -113,6 +120,9 @@ module Txcontext
       # Only include if explicitly provided, so Config.new can apply its defaults
       attrs[:context_prefix] = options[:context_prefix] unless options[:context_prefix].nil?
       attrs[:context_mode] = options[:context_mode] if options[:context_mode]
+      attrs[:include_file_paths] = options[:include_file_paths] unless options[:include_file_paths].nil?
+      attrs[:include_translation_comments] = options[:include_translation_comments] unless options[:include_translation_comments].nil?
+      attrs[:redact_prompts] = options[:redact_prompts] unless options[:redact_prompts].nil?
 
       new(**attrs)
     end
@@ -124,21 +134,8 @@ module Txcontext
     def merge_cli(options)
       @translations = options[:translations].split(',').map(&:strip) if options[:translations]
       @source_paths = options[:source].split(',').map(&:strip) if options[:source]
-      @no_cache = !options[:cache] unless options[:cache].nil?
-      @dry_run = options[:dry_run] unless options[:dry_run].nil?
-      @key_filter = options[:keys] if options[:keys]
-      @output_path = options[:output] if options[:output]
-      @output_format = options[:format] if options[:format]
-      @provider = options[:provider] if options[:provider]
-      @model = options[:model] if options[:model]
-      @concurrency = options[:concurrency] if options[:concurrency]
-      @write_back = options[:write_back] unless options[:write_back].nil?
-      @write_back_to_code = options[:write_back_to_code] unless options[:write_back_to_code].nil?
-      @diff_base = options[:diff_base] if options[:diff_base]
-      @context_prefix = options[:context_prefix] unless options[:context_prefix].nil?
-      @context_mode = options[:context_mode] if options[:context_mode]
-      @start_key = options[:start_key] if options[:start_key]
-      @end_key = options[:end_key] if options[:end_key]
+      merge_cli_scalar_options(options)
+      merge_cli_boolean_options(options)
       self
     end
 
@@ -169,6 +166,46 @@ module Txcontext
         '**/*Test.java',
         '**/*Test.kt'
       ]
+    end
+
+    private
+
+    def merge_cli_scalar_options(options)
+      scalar_mappings = {
+        key_filter: :keys,
+        output_path: :output,
+        output_format: :format,
+        provider: :provider,
+        model: :model,
+        concurrency: :concurrency,
+        diff_base: :diff_base,
+        context_prefix: :context_prefix,
+        context_mode: :context_mode,
+        start_key: :start_key,
+        end_key: :end_key,
+        include_file_paths: :include_file_paths,
+        include_translation_comments: :include_translation_comments,
+        redact_prompts: :redact_prompts
+      }
+
+      scalar_mappings.each do |attr_name, option_name|
+        value = options[option_name]
+        instance_variable_set(:"@#{attr_name}", value) unless value.nil?
+      end
+    end
+
+    def merge_cli_boolean_options(options)
+      boolean_mappings = {
+        dry_run: :dry_run,
+        write_back: :write_back,
+        write_back_to_code: :write_back_to_code
+      }
+
+      @no_cache = !options[:cache] unless options[:cache].nil?
+      boolean_mappings.each do |attr_name, option_name|
+        value = options[option_name]
+        instance_variable_set(:"@#{attr_name}", value) unless value.nil?
+      end
     end
   end
 end

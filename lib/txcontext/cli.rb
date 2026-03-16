@@ -50,6 +50,12 @@ module Txcontext
                           desc: 'How to handle existing comments: replace or append (default: replace)'
     option :start_key, type: :string, desc: 'Start processing from this key (inclusive)'
     option :end_key, type: :string, desc: 'Stop processing at this key (inclusive)'
+    option :include_file_paths, type: :boolean,
+                                desc: 'Include full source file paths in LLM prompts (default: false)'
+    option :include_translation_comments, type: :boolean,
+                                          desc: 'Include translation file comments in LLM prompts (default: true)'
+    option :redact_prompts, type: :boolean,
+                            desc: 'Redact likely secrets and PII from LLM prompts (default: true)'
 
     def extract
       validate_options!
@@ -194,6 +200,15 @@ module Txcontext
             - "Text("
             # Add custom functions like:
             # - "MyLocalizedString("
+
+        # Prompt privacy controls
+        privacy:
+          # Include full source paths in prompts sent to the LLM (default: false)
+          include_file_paths: false
+          # Include translation file comments in prompts (default: true)
+          include_translation_comments: true
+          # Redact likely secrets, URLs, and emails before sending prompts (default: true)
+          redact_prompts: true
       YAML
     end
   end

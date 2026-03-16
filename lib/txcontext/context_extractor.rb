@@ -225,6 +225,7 @@ module Txcontext
     def process_entry(entry)
       # Search for key usage in code first — needed for both cache key and LLM prompt
       matches = searcher.search(entry.key)
+      comment = @config.include_translation_comments ? entry.metadata&.dig(:comment) : nil
 
       if matches.empty?
         return ExtractionResult.new(
@@ -240,11 +241,12 @@ module Txcontext
 
       # Build a cache context digest from all prompt-shaping inputs so the cache
       # invalidates when source code, comments, or model change
-      comment = entry.metadata&.dig(:comment)
       cache_ctx = [
         matches.map { |m| "#{m.file}:#{m.line}:#{m.match_line}:#{m.enclosing_scope}:#{m.context}" }.sort.join("\0"),
         "comment:#{comment}",
-        "model:#{@config.model}"
+        "model:#{@config.model}",
+        "include_file_paths:#{@config.include_file_paths}",
+        "redact_prompts:#{@config.redact_prompts}"
       ].join("\n")
 
       # Check cache with match context included
@@ -258,7 +260,9 @@ module Txcontext
         text: entry.text,
         matches: matches,
         model: @config.model,
-        comment: entry.metadata&.dig(:comment)
+        comment: comment,
+        include_file_paths: @config.include_file_paths,
+        redact_prompts: @config.redact_prompts
       )
 
       result = ExtractionResult.new(

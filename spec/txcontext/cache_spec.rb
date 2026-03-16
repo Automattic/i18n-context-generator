@@ -50,8 +50,8 @@ RSpec.describe Txcontext::Cache do
     it 'invalidates when source code context changes' do
       cache = described_class.new(enabled: true)
 
-      ctx1 = "file.swift:10:NSLocalizedString(\"key\"):viewDidLoad:surrounding code v1"
-      ctx2 = "file.swift:10:NSLocalizedString(\"key\"):viewDidLoad:surrounding code v2"
+      ctx1 = 'file.swift:10:NSLocalizedString("key"):viewDidLoad:surrounding code v1'
+      ctx2 = 'file.swift:10:NSLocalizedString("key"):viewDidLoad:surrounding code v2'
 
       cache.set('key', 'Hello', { description: 'old context' }, context: ctx1)
 

@@ -47,7 +47,7 @@ RSpec.describe Txcontext::ContextExtractor do
         translations: [],
         key_filter: key_filter
       )
-      Txcontext::ContextExtractor.new(config)
+      described_class.new(config)
     end
 
     it 'filters by exact key' do
@@ -92,7 +92,7 @@ RSpec.describe Txcontext::ContextExtractor do
   describe '#android_base_key' do
     let(:extractor) do
       config = Txcontext::Config.new(translations: [])
-      Txcontext::ContextExtractor.new(config)
+      described_class.new(config)
     end
 
     it 'strips plural quantity suffix' do
@@ -117,7 +117,7 @@ RSpec.describe Txcontext::ContextExtractor do
 
     it 'filters from start_key to end' do
       config = Txcontext::Config.new(translations: [], start_key: 'key_3')
-      extractor = Txcontext::ContextExtractor.new(config)
+      extractor = described_class.new(config)
 
       result = extractor.send(:filter_by_range, entries)
 
@@ -126,7 +126,7 @@ RSpec.describe Txcontext::ContextExtractor do
 
     it 'filters from beginning to end_key' do
       config = Txcontext::Config.new(translations: [], end_key: 'key_3')
-      extractor = Txcontext::ContextExtractor.new(config)
+      extractor = described_class.new(config)
 
       result = extractor.send(:filter_by_range, entries)
 
@@ -135,7 +135,7 @@ RSpec.describe Txcontext::ContextExtractor do
 
     it 'filters between start_key and end_key' do
       config = Txcontext::Config.new(translations: [], start_key: 'key_2', end_key: 'key_4')
-      extractor = Txcontext::ContextExtractor.new(config)
+      extractor = described_class.new(config)
 
       result = extractor.send(:filter_by_range, entries)
 
@@ -144,7 +144,7 @@ RSpec.describe Txcontext::ContextExtractor do
 
     it 'handles missing start_key gracefully' do
       config = Txcontext::Config.new(translations: [], start_key: 'nonexistent')
-      extractor = Txcontext::ContextExtractor.new(config)
+      extractor = described_class.new(config)
 
       result = extractor.send(:filter_by_range, entries)
 
@@ -155,7 +155,7 @@ RSpec.describe Txcontext::ContextExtractor do
   describe '#truncate' do
     let(:extractor) do
       config = Txcontext::Config.new(translations: [])
-      Txcontext::ContextExtractor.new(config)
+      described_class.new(config)
     end
 
     it 'returns short strings unchanged' do
@@ -163,7 +163,7 @@ RSpec.describe Txcontext::ContextExtractor do
     end
 
     it 'truncates long strings with ellipsis' do
-      expect(extractor.send(:truncate, 'a' * 50, 10)).to eq('a' * 7 + '...')
+      expect(extractor.send(:truncate, 'a' * 50, 10)).to eq("#{'a' * 7}...")
     end
   end
 

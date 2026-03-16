@@ -24,15 +24,17 @@ module Txcontext
         end
       end
 
-      def generate_context(key:, text:, matches:, model: nil, comment: nil)
+      def generate_context(key:, text:, matches:, model: nil, comment: nil,
+                           include_file_paths: false, redact_prompts: true)
         raise NotImplementedError, 'Subclasses must implement #generate_context'
       end
 
       protected
 
-      def build_prompt(key:, text:, matches:, comment: nil)
+      def build_prompt(key:, text:, matches:, comment: nil,
+                       include_file_paths: false, redact_prompts: true)
         platform = detect_platform(matches)
-
+        safe_comment = sanitize_prompt_text(comment, redact: redact_prompts)
         placeholder_info = detect_placeholders(text)
 
         <<~PROMPT
@@ -43,9 +45,9 @@ module Txcontext
 
           ## Original Text
           "#{text}"
-          #{"\n## Developer Comment\n\"#{comment}\"\n" if comment && !comment.strip.empty?}#{"\n## Format Placeholders\n#{placeholder_info}\n" if placeholder_info}
+          #{"\n## Developer Comment\n\"#{safe_comment}\"\n" if safe_comment && !safe_comment.strip.empty?}#{"\n## Format Placeholders\n#{placeholder_info}\n" if placeholder_info}
           ## Code Usage
-          #{format_matches(matches)}
+          #{format_matches(matches, include_file_paths: include_file_paths, redact_prompts: redact_prompts)}
 
           ## Task
           Analyze how this string is used in the mobile app code and provide context for translators.
@@ -99,16 +101,34 @@ module Txcontext
         end
       end
 
-      def format_matches(matches)
+      def format_matches(matches, include_file_paths:, redact_prompts:)
         matches.map.with_index do |match, i|
           scope_info = match.enclosing_scope ? " (in #{match.enclosing_scope})" : ''
+          location = include_file_paths ? match.file : File.basename(match.file)
+          context = sanitize_prompt_text(match.context, redact: redact_prompts)
+
           <<~MATCH
-            ### Match #{i + 1}: #{match.file}:#{match.line}#{scope_info}
+            ### Match #{i + 1}: #{location}:#{match.line}#{scope_info}
             ```
-            #{match.context}
+            #{context}
             ```
           MATCH
         end.join("\n")
+      end
+
+      def sanitize_prompt_text(text, redact:)
+        return text if text.nil? || !redact
+
+        text
+          .gsub(%r{https?://\S+}i, '[REDACTED_URL]')
+          .gsub(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, '[REDACTED_EMAIL]')
+          .gsub(%r{Bearer\s+[A-Za-z0-9\-._~+/]+=*}i, 'Bearer [REDACTED_TOKEN]')
+          .gsub(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*)"[^"]*"/i,
+                '\1"[REDACTED_SECRET]"')
+          .gsub(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*)'[^']*'/i,
+                "\\1'[REDACTED_SECRET]'")
+          .gsub(/\beyJ[A-Za-z0-9\-_]+(?:\.[A-Za-z0-9\-_]+){2}\b/, '[REDACTED_TOKEN]')
+          .gsub(/\b[A-Fa-f0-9]{32,}\b/, '[REDACTED_TOKEN]')
       end
 
       def detect_placeholders(text)
