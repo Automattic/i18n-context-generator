@@ -260,6 +260,37 @@ RSpec.describe Txcontext::Writers::SwiftWriter do
         expect(output.lines.grep(/comment:/).size).to eq(1)
       end
     end
+
+    it 'preserves escaped quotes in existing comments when appending' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Test.swift')
+        File.write(path, 'let t = NSLocalizedString("k", comment: "Say \"hi\" to users")')
+
+        results = { 'k' => build_result('k', 'Extra context') }
+        writer = described_class.new(context_mode: 'append')
+
+        writer.update_file(path, results)
+
+        output = File.read(path)
+        expect(output).to include('Say \\"hi\\" to users Context: Extra context')
+      end
+    end
+
+    it 'replaces escaped-quote comments without corrupting the Swift string' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Test.swift')
+        File.write(path, 'let t = NSLocalizedString("k", comment: "Say \"hi\" to users")')
+
+        results = { 'k' => build_result('k', 'New context') }
+        writer = described_class.new(context_mode: 'replace')
+
+        writer.update_file(path, results)
+
+        output = File.read(path)
+        expect(output).to include('comment: "Context: New context"')
+        expect(output).not_to include('users")hi')
+      end
+    end
   end
 
   describe 'regex escaping of keys' do

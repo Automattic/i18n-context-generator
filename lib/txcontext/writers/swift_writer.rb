@@ -7,6 +7,10 @@ module Txcontext
     class SwiftWriter
       include Helpers
 
+      SWIFT_STRING_PATTERN = '"(?:\\\\.|[^"\\\\])*"'
+      COMMENT_ARGUMENT_PATTERN = /comment:\s*"((?:\\.|[^"\\])*)"/
+      private_constant :SWIFT_STRING_PATTERN, :COMMENT_ARGUMENT_PATTERN
+
       # Default patterns for Swift localization functions
       # Each pattern should capture: (prefix)(key)(middle)(comment_value)(suffix)
       DEFAULT_FUNCTIONS = %w[
@@ -86,30 +90,32 @@ module Txcontext
       end
 
       def build_pattern_for_function(func, escaped_key)
+        comment_pattern = "comment:\\s*#{SWIFT_STRING_PATTERN}"
+
         case func
         when 'NSLocalizedString'
           # NSLocalizedString("key", comment: "...")
           # NSLocalizedString("key", value: "...", comment: "...")
           # NSLocalizedString("key", tableName: "...", comment: "...")
-          /NSLocalizedString\(\s*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
+          Regexp.new("NSLocalizedString\\(\\s*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
         when 'String(localized:'
           # String(localized: "key", comment: "...")
-          /String\(\s*localized:\s*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
+          Regexp.new("String\\(\\s*localized:\\s*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
         when 'Text('
           # Text("key", comment: "...")
           # Text(LocalizedStringKey("key"), comment: "...")
-          /Text\([^)]*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
+          Regexp.new("Text\\([^)]*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
         else
           # Custom function - assume pattern like: func("key", ..., comment: "...")
           escaped_func = Regexp.escape(func)
-          /#{escaped_func}\([^)]*"#{escaped_key}"[^)]*comment:\s*"[^"]*"[^)]*\)/m
+          Regexp.new("#{escaped_func}\\([^)]*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
         end
       end
 
       def update_match(match, _func, _key, new_comment)
         # Replace the comment value while preserving the rest of the call
-        match.gsub(/comment:\s*"([^"]*)"/) do |_comment_match|
-          existing_comment = Regexp.last_match(1)
+        match.gsub(COMMENT_ARGUMENT_PATTERN) do |_comment_match|
+          existing_comment = unescape_swift_string(Regexp.last_match(1))
           final_comment = build_final_comment(existing_comment, new_comment)
           "comment: \"#{escape_swift_string(final_comment)}\""
         end
@@ -132,8 +138,23 @@ module Txcontext
       def escape_swift_string(str)
         str.gsub('\\', '\\\\')
            .gsub('"', '\\"')
+           .gsub("\r", '\\r')
            .gsub("\n", '\\n')
            .gsub("\t", '\\t')
+      end
+
+      def unescape_swift_string(str)
+        escape_map = {
+          '"' => '"',
+          '\\' => '\\',
+          'n' => "\n",
+          'r' => "\r",
+          't' => "\t"
+        }
+
+        str.gsub(/\\(["\\nrt])/) do
+          escape_map.fetch(Regexp.last_match(1))
+        end
       end
     end
   end
