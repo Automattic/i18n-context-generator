@@ -22,6 +22,7 @@ RSpec.describe Txcontext::Config do
       expect(config.include_file_paths).to be false
       expect(config.include_translation_comments).to be true
       expect(config.redact_prompts).to be true
+      expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
     end
 
     it 'accepts custom values' do
@@ -31,7 +32,8 @@ RSpec.describe Txcontext::Config do
         concurrency: 10,
         output_path: 'output.csv',
         no_cache: false,
-        dry_run: true
+        dry_run: true,
+        context_prefix: ''
       )
 
       expect(config.translations).to eq(['/path/to/file.strings'])
@@ -40,11 +42,6 @@ RSpec.describe Txcontext::Config do
       expect(config.output_path).to eq('output.csv')
       expect(config.no_cache).to be false
       expect(config.dry_run).to be true
-    end
-
-    it 'allows empty context_prefix' do
-      config = described_class.new(context_prefix: '')
-
       expect(config.context_prefix).to eq('')
     end
 
@@ -237,7 +234,7 @@ RSpec.describe Txcontext::Config do
   end
 
   describe '.default_ignore_patterns' do
-    it 'includes common patterns to ignore' do
+    it 'includes common source, dependency, and test patterns to ignore' do
       patterns = described_class.default_ignore_patterns
 
       expect(patterns).to include('**/node_modules/**')
@@ -259,16 +256,6 @@ RSpec.describe Txcontext::Config do
       expect(patterns).to include('**/*Tests.kt')
       expect(patterns).to include('**/*Test.java')
       expect(patterns).to include('**/*Test.kt')
-    end
-  end
-
-  describe '#default_swift_functions' do
-    it 'includes common Swift localization functions' do
-      config = described_class.new
-
-      expect(config.swift_functions).to include('NSLocalizedString')
-      expect(config.swift_functions).to include('String(localized:')
-      expect(config.swift_functions).to include('Text(')
     end
   end
 end

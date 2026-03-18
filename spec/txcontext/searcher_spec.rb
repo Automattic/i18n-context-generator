@@ -150,20 +150,13 @@ RSpec.describe Txcontext::Searcher do
     end
 
     describe 'match context' do
-      it 'includes surrounding context lines' do
+      it 'includes surrounding lines and marks the matching line with >>>' do
         matches = searcher.search('settings.title')
 
         expect(matches).not_to be_empty
         match = matches.first
         expect(match.context).not_to be_empty
         expect(match.context.lines.count).to be > 1
-      end
-
-      it 'marks the matching line with >>>' do
-        matches = searcher.search('settings.title')
-
-        expect(matches).not_to be_empty
-        match = matches.first
         expect(match.context).to include('>>>')
       end
     end

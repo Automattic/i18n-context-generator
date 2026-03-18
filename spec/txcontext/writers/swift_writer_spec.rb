@@ -18,7 +18,7 @@ RSpec.describe Txcontext::Writers::SwiftWriter do
         results = { 'settings.title' => build_result('settings.title', 'Title for settings screen') }
         writer = described_class.new
 
-        writer.update_file(path, results)
+        expect(writer.update_file(path, results)).to be true
 
         output = File.read(path)
         expect(output).to include('comment: "Context: Title for settings screen"')
@@ -78,18 +78,6 @@ RSpec.describe Txcontext::Writers::SwiftWriter do
         output = File.read(path)
         expect(output).to include('comment: "Context: Multi-line call"')
         expect(output).not_to include('"existing"')
-      end
-    end
-
-    it 'returns true when file was updated' do
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, 'Test.swift')
-        File.write(path, 'let t = NSLocalizedString("k", comment: "")')
-
-        results = { 'k' => build_result('k', 'Description') }
-        writer = described_class.new
-
-        expect(writer.update_file(path, results)).to be true
       end
     end
 
