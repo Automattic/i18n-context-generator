@@ -81,11 +81,11 @@ module Txcontext
       # Convert glob pattern to regex
       # Handle common glob patterns: *, **, ?
       regex_str = Regexp.escape(glob_pattern)
-                        .gsub('\*\*/', '.*/')     # **/ matches any path
+                        .gsub('\*\*/', '(.*/)?')  # **/ matches any path (including empty)
                         .gsub('\*\*', '.*')       # ** matches anything
                         .gsub('\*', '[^/]*')      # * matches within path segment
                         .gsub('\?', '.')          # ? matches single char
-      Regexp.new(regex_str)
+      Regexp.new("(?:^|/)#{regex_str}(?:$|/)")
     end
 
     def discover_files

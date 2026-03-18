@@ -60,5 +60,16 @@ RSpec.describe Txcontext::LLM::OpenAI do
       expect(result.max_length).to eq(18)
       expect(result.error).to be_nil
     end
+
+    it 'uses the default model when none is specified' do
+      allow(client).to receive(:post_json) do |body:, **_kwargs|
+        expect(body[:model]).to eq(described_class::DEFAULT_MODEL)
+        response
+      end
+
+      client.generate_context(key: 'ok', text: 'OK', matches: [])
+
+      expect(client).to have_received(:post_json)
+    end
   end
 end

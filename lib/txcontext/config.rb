@@ -182,10 +182,7 @@ module Txcontext
         context_prefix: :context_prefix,
         context_mode: :context_mode,
         start_key: :start_key,
-        end_key: :end_key,
-        include_file_paths: :include_file_paths,
-        include_translation_comments: :include_translation_comments,
-        redact_prompts: :redact_prompts
+        end_key: :end_key
       }
 
       scalar_mappings.each do |attr_name, option_name|
@@ -198,7 +195,10 @@ module Txcontext
       boolean_mappings = {
         dry_run: :dry_run,
         write_back: :write_back,
-        write_back_to_code: :write_back_to_code
+        write_back_to_code: :write_back_to_code,
+        include_file_paths: :include_file_paths,
+        include_translation_comments: :include_translation_comments,
+        redact_prompts: :redact_prompts
       }
 
       @no_cache = !options[:cache] unless options[:cache].nil?

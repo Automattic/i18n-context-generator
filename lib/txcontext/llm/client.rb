@@ -133,7 +133,7 @@ module Txcontext
           .gsub(/((?:api[_-]?key|access[_-]?token|refresh[_-]?token|secret|password)\s*[:=]\s*)'[^']*'/i,
                 "\\1'[REDACTED_SECRET]'")
           .gsub(/\beyJ[A-Za-z0-9\-_]+(?:\.[A-Za-z0-9\-_]+){2}\b/, '[REDACTED_TOKEN]')
-          .gsub(/\b[A-Fa-f0-9]{32,}\b/, '[REDACTED_TOKEN]')
+          .gsub(/\b(?!\h{8}-\h{4}-\h{4}-\h{4}-\h{12}\b)[A-Fa-f0-9]{32,}\b/, '[REDACTED_TOKEN]')
       end
 
       def detect_placeholders(text)
@@ -209,10 +209,7 @@ module Txcontext
       end
 
       def post_json(uri:, headers:, body:, open_timeout: 10, read_timeout: 60)
-        http = Net::HTTP.new(uri.host, uri.port)
-        http.use_ssl = uri.scheme == 'https'
-        http.open_timeout = open_timeout
-        http.read_timeout = read_timeout
+        http = http_for(uri, open_timeout: open_timeout, read_timeout: read_timeout)
 
         request = Net::HTTP::Post.new(
           uri.request_uri,
@@ -221,6 +218,36 @@ module Txcontext
         request.body = JSON.generate(body)
 
         http.request(request)
+      end
+
+      # Returns a persistent Net::HTTP session scoped to the current thread.
+      # This preserves connection reuse without sharing a mutable Net::HTTP
+      # instance across the worker pool.
+      def http_for(uri, open_timeout:, read_timeout:)
+        key = [uri.scheme, uri.host, uri.port]
+        sessions = Thread.current.thread_variable_get(http_sessions_key) || {}
+        http = sessions[key]
+
+        if http&.started?
+          http.open_timeout = open_timeout
+          http.read_timeout = read_timeout
+          return http
+        end
+
+        http = Net::HTTP.new(uri.host, uri.port)
+        http.use_ssl = uri.scheme == 'https'
+        http.open_timeout = open_timeout
+        http.read_timeout = read_timeout
+        http.keep_alive_timeout = 30
+        http.start
+
+        sessions[key] = http
+        Thread.current.thread_variable_set(http_sessions_key, sessions)
+        http
+      end
+
+      def http_sessions_key
+        @http_sessions_key ||= :"txcontext_http_sessions_#{object_id}"
       end
     end
   end

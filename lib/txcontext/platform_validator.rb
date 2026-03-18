@@ -70,20 +70,23 @@ module Txcontext
     end
 
     def ignored_source_file?(path)
-      relative_path = path.delete_prefix("#{Dir.pwd}/")
-
       @ignore_patterns.any? do |pattern|
-        [path, relative_path].any? { |candidate| pattern.match?(candidate) }
+        candidates = [path]
+        @config.source_paths.each do |root|
+          prefix = root.end_with?('/') ? root : "#{root}/"
+          candidates << path.delete_prefix(prefix) if path.start_with?(prefix)
+        end
+        candidates.any? { |candidate| pattern.match?(candidate) }
       end
     end
 
     def glob_to_regex(glob_pattern)
       regex_str = Regexp.escape(glob_pattern)
-                        .gsub('\*\*/', '.*/')
+                        .gsub('\*\*/', '(.*/)?')
                         .gsub('\*\*', '.*')
                         .gsub('\*', '[^/]*')
                         .gsub('\?', '.')
-      Regexp.new(regex_str)
+      Regexp.new("(?:^|/)#{regex_str}(?:$|/)")
     end
   end
 end

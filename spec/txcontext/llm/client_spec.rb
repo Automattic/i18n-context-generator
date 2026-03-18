@@ -10,6 +10,10 @@ RSpec.describe Txcontext::LLM::Client do
       def prompt_for(**kwargs)
         send(:build_prompt, **kwargs)
       end
+
+      def http_client_for(uri:, **kwargs)
+        send(:http_for, uri, **kwargs)
+      end
     end
   end
   let(:client) { client_class.new }
@@ -98,5 +102,57 @@ RSpec.describe Txcontext::LLM::Client do
     expect(result.tone).to eq('neutral')
     expect(result.max_length).to eq(12)
     expect(result.error).to be_nil
+  end
+
+  it 'redacts 32-character hex tokens without redacting UUIDs' do
+    text = [
+      'checksum=0123456789abcdef0123456789abcdef',
+      'id=123e4567-e89b-12d3-a456-426614174000'
+    ].join("\n")
+
+    sanitized = client.send(:sanitize_prompt_text, text, redact: true)
+
+    expect(sanitized).to include('checksum=[REDACTED_TOKEN]')
+    expect(sanitized).to include('id=123e4567-e89b-12d3-a456-426614174000')
+  end
+
+  it 'reuses HTTP sessions within a thread while isolating them across threads' do
+    fake_http_class = Class.new do
+      attr_accessor :use_ssl, :open_timeout, :read_timeout, :keep_alive_timeout
+
+      def initialize(_host, _port)
+        @started = false
+      end
+
+      def start
+        @started = true
+        self
+      end
+
+      def started?
+        @started
+      end
+    end
+
+    allow(Net::HTTP).to receive(:new) { |host, port| fake_http_class.new(host, port) }
+
+    uri = URI('https://api.example.test/v1/responses')
+
+    main_thread_http = client.http_client_for(uri: uri, open_timeout: 10, read_timeout: 60)
+    same_thread_http = client.http_client_for(uri: uri, open_timeout: 10, read_timeout: 30)
+
+    thread_http = nil
+    thread_http_again = nil
+    Thread.new do
+      thread_http = client.http_client_for(uri: uri, open_timeout: 10, read_timeout: 60)
+      thread_http_again = client.http_client_for(uri: uri, open_timeout: 10, read_timeout: 15)
+    end.join
+
+    expect(same_thread_http).to be(main_thread_http)
+    expect(main_thread_http.read_timeout).to eq(30)
+    expect(thread_http_again).to be(thread_http)
+    expect(thread_http).not_to be(main_thread_http)
+    expect(thread_http.read_timeout).to eq(15)
+    expect(Net::HTTP).to have_received(:new).twice
   end
 end
