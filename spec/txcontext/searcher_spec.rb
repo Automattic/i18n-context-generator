@@ -53,6 +53,15 @@ RSpec.describe Txcontext::Searcher do
 
           expect(matches.any? { |m| m.file.end_with?('UnrelatedSaveString.swift') }).to be false
         end
+
+        it 'does not pull unrelated nested Localization members from other files' do
+          matches = searcher.search('wrapper.title')
+
+          expect(matches).not_to be_empty
+          expect(matches.any? { |m| m.file.end_with?('LocalizationWrapperView.swift') &&
+            m.match_line.include?('label.text = Localization.title') }).to be true
+          expect(matches.any? { |m| m.file.end_with?('UnrelatedLocalizationTitleView.swift') }).to be false
+        end
       end
 
       context 'with String(localized:) pattern' do

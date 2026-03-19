@@ -1,6 +1,12 @@
 import UIKit
 
 final class LocalizationWrapperView: UIView {
+    private lazy var titleLabel: UILabel = {
+        let label = UILabel()
+        label.text = Localization.title
+        return label
+    }()
+
     private lazy var saveButton: UIButton = {
         let button = UIButton(type: .system)
         button.setTitle(Localization.save, for: .normal)
@@ -16,6 +22,11 @@ final class LocalizationWrapperView: UIView {
 
 private extension LocalizationWrapperView {
     enum Localization {
+        static let title = NSLocalizedString(
+            "wrapper.title",
+            comment: "View title"
+        )
+
         static let save = NSLocalizedString(
             "wrapper.save",
             comment: "Button title"

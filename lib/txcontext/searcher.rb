@@ -182,11 +182,27 @@ module Txcontext
       end.uniq
 
       references.flat_map do |reference|
-        wrapper_pattern = [Regexp.new("\\b#{Regexp.escape(reference[:type_name])}\\.#{Regexp.escape(reference[:member_name])}\\b")]
-        files.flat_map do |file|
-          search_file(file, wrapper_pattern, reference[:member_name], enable_multiline: false).reject do |match|
-            match.file == reference[:definition_file] && match.line == reference[:definition_line]
-          end
+        matches = []
+        local_pattern = ios_wrapper_local_pattern(reference)
+        qualified_pattern = ios_wrapper_qualified_pattern(reference)
+
+        matches.concat(
+          search_file(reference[:definition_file], [local_pattern], reference[:member_name], enable_multiline: false)
+        )
+
+        cross_file_pattern = qualified_pattern || local_pattern
+        cross_file_candidates = if qualified_pattern || reference[:type_path].size == 1
+                                  files.reject { |file| file == reference[:definition_file] }
+                                else
+                                  []
+                                end
+
+        cross_file_candidates.each do |file|
+          matches.concat(search_file(file, [cross_file_pattern], reference[:member_name], enable_multiline: false))
+        end
+
+        matches.reject do |match|
+          match.file == reference[:definition_file] && match.line == reference[:definition_line]
         end
       end
     end
@@ -202,11 +218,11 @@ module Txcontext
       definition_match = IOS_WRAPPER_DEFINITION_PATTERN.match(definition_line)
       return unless definition_match&.captures&.first
 
-      type_name = find_nearest_ios_type_name(lines, definition_index)
-      return unless type_name
+      type_path = find_ios_type_path(lines, definition_index)
+      return if type_path.empty?
 
       {
-        type_name: type_name,
+        type_path: type_path,
         member_name: definition_match[2],
         definition_file: match.file,
         definition_line: definition_index + 1
@@ -227,13 +243,40 @@ module Txcontext
       nil
     end
 
-    def find_nearest_ios_type_name(lines, index)
-      index.downto(0) do |i|
-        match = IOS_TYPE_DECLARATION_PATTERN.match(lines[i])
-        return match[2] if match
+    def find_ios_type_path(lines, index)
+      scope_stack = []
+      brace_depth = 0
+      pending_type = nil
+
+      lines[0..index].each do |line|
+        if (type_match = IOS_TYPE_DECLARATION_PATTERN.match(line))
+          if line.include?('{')
+            scope_stack << { name: type_match[2], depth: brace_depth + 1 }
+          else
+            pending_type = { name: type_match[2], depth: brace_depth + 1 }
+          end
+        elsif pending_type && line.include?('{')
+          scope_stack << pending_type
+          pending_type = nil
+        end
+
+        brace_depth += line.count('{') - line.count('}')
+        scope_stack.pop while scope_stack.any? && scope_stack.last[:depth] > brace_depth
       end
 
-      nil
+      scope_stack.map { |scope| scope[:name] }
+    end
+
+    def ios_wrapper_local_pattern(reference)
+      local_type_name = reference[:type_path].last
+      Regexp.new("\\b#{Regexp.escape(local_type_name)}\\.#{Regexp.escape(reference[:member_name])}\\b")
+    end
+
+    def ios_wrapper_qualified_pattern(reference)
+      return nil unless reference[:type_path].size > 1
+
+      qualified_type_path = reference[:type_path].join('.')
+      Regexp.new("\\b#{Regexp.escape(qualified_type_path)}\\.#{Regexp.escape(reference[:member_name])}\\b")
     end
 
     # Find matches where localization calls span multiple lines
