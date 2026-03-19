@@ -1,0 +1,67 @@
+# frozen_string_literal: true
+
+module I18nContextGenerator
+  module Writers
+    # Writer that updates iOS .strings files with context comments
+    # Uses the dotstrings gem for proper parsing and generation
+    class StringsWriter
+      include Helpers
+
+      def initialize(context_prefix: 'Context: ', context_mode: 'replace')
+        @context_prefix = context_prefix
+        @context_mode = context_mode
+      end
+
+      def write(results, source_path)
+        return unless File.exist?(source_path)
+
+        # Parse the existing file
+        original_file = DotStrings.parse_file(source_path, strict: false)
+        results_by_key = results.each_with_object({}) do |result, lookup|
+          next unless result_matches_source_path?(result, source_path)
+
+          lookup[result.key] = result
+        end
+
+        # Build new file with updated comments (DotStrings::Item is immutable)
+        new_file = DotStrings::File.new
+
+        original_file.items.each do |item|
+          result = results_by_key[item.key]
+
+          new_comment = if writable_result?(result)
+                          build_comment(item.comment, result.description)
+                        else
+                          item.comment
+                        end
+
+          new_item = DotStrings::Item.new(
+            key: item.key,
+            value: item.value,
+            comment: new_comment
+          )
+          new_file << new_item
+        end
+
+        # Write back to file
+        File.write(source_path, new_file.to_s)
+      end
+
+      private
+
+      def build_comment(existing_comment, context_description)
+        context_line = "#{@context_prefix}#{context_description}"
+
+        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
+          context_line
+        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
+          # Replace existing context line (idempotent update)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
+        else
+          # Append context to existing comment
+          "#{existing_comment}\n#{context_line}"
+        end
+      end
+    end
+  end
+end

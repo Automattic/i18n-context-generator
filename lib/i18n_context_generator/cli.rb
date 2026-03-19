@@ -1,0 +1,223 @@
+# frozen_string_literal: true
+
+require 'thor'
+
+module I18nContextGenerator
+  # Thor-based CLI entry point for the i18n-context-generator command.
+  class CLI < Thor
+    def self.exit_on_failure?
+      true
+    end
+
+    desc 'extract', 'Extract translation context from source code'
+    long_desc <<~DESC
+      Analyzes source code to extract contextual information for translation keys.
+      Uses AI to understand how strings are used in the UI and generates descriptions
+      to help translators produce better translations.
+
+      Examples:
+        # iOS app
+        i18n-context-generator extract -t ios/Localizable.strings -s ios/
+
+        # Android app
+        i18n-context-generator extract -t android/res/values/strings.xml -s android/app/
+
+        # Write context back to source files
+        i18n-context-generator extract -t Localizable.strings -s . --write-back
+
+        # Use config file
+        i18n-context-generator extract --config .i18n-context-generator.yml
+    DESC
+    option :config, aliases: '-c', desc: 'Path to config file (.i18n-context-generator.yml)'
+    option :translations, aliases: '-t', desc: 'Translation file(s), comma-separated'
+    option :source, aliases: '-s', desc: 'Source directory(ies) to search, comma-separated'
+    option :output, aliases: '-o', desc: 'Output file path (CSV written only if specified)'
+    option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (default: csv)'
+    option :provider, aliases: '-p', enum: %w[anthropic openai], desc: 'LLM provider (default: anthropic)'
+    option :model, aliases: '-m', desc: 'LLM model to use'
+    option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
+    option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
+    option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
+    option :cache, type: :boolean, desc: 'Enable caching of LLM results'
+    option :write_back, type: :boolean,
+                        desc: 'Write context back to source translation files (.strings, strings.xml)'
+    option :write_back_to_code, type: :boolean,
+                                desc: 'Write context back to Swift source code comment: parameters'
+    option :diff_base, type: :string, desc: 'Only process keys changed since this git ref (e.g., main, origin/main)'
+    option :context_prefix, type: :string,
+                            desc: 'Prefix for context comments (default: "Context: ", use empty string for none)'
+    option :context_mode, type: :string, enum: %w[replace append],
+                          desc: 'How to handle existing comments: replace or append (default: replace)'
+    option :start_key, type: :string, desc: 'Start processing from this key (inclusive)'
+    option :end_key, type: :string, desc: 'Stop processing at this key (inclusive)'
+    option :include_file_paths, type: :boolean,
+                                desc: 'Include full source file paths in LLM prompts (default: false)'
+    option :include_translation_comments, type: :boolean,
+                                          desc: 'Include translation file comments in LLM prompts (default: true)'
+    option :redact_prompts, type: :boolean,
+                            desc: 'Redact likely secrets and PII from LLM prompts (default: true)'
+
+    def extract
+      validate_options!
+      config = Config.load(options)
+      validate_api_key!(provider: config.provider, dry_run: config.dry_run)
+      validate_diff_base!(base_ref: config.diff_base) if config.diff_base
+      extractor = ContextExtractor.new(config)
+      extractor.run
+      fail_if_extraction_errors!(extractor)
+    rescue I18nContextGenerator::Error => e
+      say_error "Error: #{e.message}"
+      exit 1
+    rescue Interrupt
+      say "\nInterrupted"
+      exit 130
+    end
+
+    desc 'init', 'Create a sample config file'
+    option :force, type: :boolean, default: false, desc: 'Overwrite existing config'
+
+    def init
+      config_path = '.i18n-context-generator.yml'
+
+      if File.exist?(config_path) && !options[:force]
+        say_error 'Config file already exists. Use --force to overwrite.'
+        exit 1
+      end
+
+      File.write(config_path, sample_config)
+      say "Created #{config_path}"
+    end
+
+    desc 'version', 'Show version'
+    def version
+      say "i18n-context-generator #{VERSION}"
+    end
+
+    default_task :extract
+
+    private
+
+    def validate_options!
+      return if options[:config] && File.exist?(options[:config])
+
+      return if options[:translations]
+
+      say_error 'Error: --translations (-t) is required unless using a config file'
+      exit 1
+    end
+
+    def validate_api_key!(provider: nil, dry_run: nil)
+      return if dry_run.nil? ? options[:dry_run] : dry_run
+
+      provider ||= options[:provider] || 'anthropic'
+      env_var = case provider
+                when 'anthropic' then 'ANTHROPIC_API_KEY'
+                when 'openai' then 'OPENAI_API_KEY'
+                else "#{provider.upcase}_API_KEY"
+                end
+
+      return if ENV[env_var]
+
+      say_error "Error: #{env_var} environment variable is required for provider '#{provider}'"
+      say_error "Set it with: export #{env_var}=your-api-key"
+      exit 1
+    end
+
+    def validate_diff_base!(base_ref: options[:diff_base])
+      unless GitDiff.available?
+        say_error 'Error: --diff-base requires a git repository'
+        exit 1
+      end
+
+      git_diff = GitDiff.new(base_ref: base_ref)
+      return if git_diff.base_ref_exists?
+
+      say_error "Error: git ref '#{base_ref}' not found"
+      say_error 'Try: origin/main, main, or a specific commit SHA'
+      exit 1
+    end
+
+    def say_error(message)
+      warn message
+    end
+
+    def fail_if_extraction_errors!(extractor)
+      return unless extractor.errors.any?
+
+      say_error "Completed with #{extractor.errors.size} extraction error(s)."
+      exit 1
+    end
+
+    def sample_config
+      <<~YAML
+        # i18n-context-generator configuration
+        # Extract translation context from mobile app source code
+
+        # Translation files to process
+        # Supported formats: .strings (iOS), strings.xml (Android), .json, .yml
+        translations:
+          # iOS example
+          - path: ios/MyApp/Resources/Localizable.strings
+
+          # Android example
+          # - path: android/app/src/main/res/values/strings.xml
+
+        # Source code directories to search
+        source:
+          paths:
+            - ios/MyApp/
+            # - android/app/src/main/java/
+          ignore:
+            - "**/Pods/**"
+            - "**/build/**"
+            - "**/*.generated.*"
+            - "**/*Tests*"
+
+        # LLM configuration
+        llm:
+          provider: anthropic
+          model: claude-sonnet-4-6
+          # API key is read from the matching provider env var
+          # (ANTHROPIC_API_KEY or OPENAI_API_KEY)
+
+        # Processing options
+        processing:
+          concurrency: 5
+          context_lines: 15
+          max_matches_per_key: 3
+
+        # Output configuration
+        output:
+          format: csv
+          path: translation-context.csv
+          # Set to true to write context comments back to translation files (.strings, strings.xml)
+          write_back: false
+          # Set to true to write context back to Swift source code comment: parameters
+          write_back_to_code: false
+          # Prefix for context comments (use empty string for no prefix)
+          # context_prefix: "Context: "
+          # How to handle existing comments: "replace" or "append"
+          # context_mode: replace
+
+        # Swift-specific configuration for write_back_to_code
+        swift:
+          # Localization functions to update (default shown)
+          functions:
+            - NSLocalizedString
+            - "String(localized:"
+            - "Text("
+            # Add custom functions like:
+            # - "MyLocalizedString("
+
+        # Prompt privacy controls
+        privacy:
+          # Include full source paths in prompts sent to the LLM (default: false)
+          include_file_paths: false
+          # Include translation file comments in prompts (default: true)
+          include_translation_comments: true
+          # Redact likely secrets, URLs, and emails before sending prompts (default: true)
+          redact_prompts: true
+      YAML
+    end
+  end
+end

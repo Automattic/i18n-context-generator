@@ -1,0 +1,36 @@
+# frozen_string_literal: true
+
+require 'yaml'
+require 'csv'
+require 'digest'
+require 'fileutils'
+require 'oj'
+require 'concurrent'
+require 'tty-progressbar'
+require 'dotstrings'
+
+require_relative 'i18n_context_generator/version'
+require_relative 'i18n_context_generator/config'
+require_relative 'i18n_context_generator/parsers/base'
+require_relative 'i18n_context_generator/parsers/json_parser'
+require_relative 'i18n_context_generator/parsers/yaml_parser'
+require_relative 'i18n_context_generator/parsers/strings_parser'
+require_relative 'i18n_context_generator/parsers/android_xml_parser'
+require_relative 'i18n_context_generator/searcher'
+require_relative 'i18n_context_generator/llm/client'
+require_relative 'i18n_context_generator/llm/anthropic'
+require_relative 'i18n_context_generator/llm/openai'
+require_relative 'i18n_context_generator/writers/helpers'
+require_relative 'i18n_context_generator/writers/csv_writer'
+require_relative 'i18n_context_generator/writers/json_writer'
+require_relative 'i18n_context_generator/writers/strings_writer'
+require_relative 'i18n_context_generator/writers/android_xml_writer'
+require_relative 'i18n_context_generator/writers/swift_writer'
+require_relative 'i18n_context_generator/cache'
+require_relative 'i18n_context_generator/git_diff'
+require_relative 'i18n_context_generator/platform_validator'
+require_relative 'i18n_context_generator/context_extractor'
+
+module I18nContextGenerator
+  class Error < StandardError; end
+end

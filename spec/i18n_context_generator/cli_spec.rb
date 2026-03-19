@@ -1,0 +1,163 @@
+# frozen_string_literal: true
+
+require 'i18n_context_generator/cli'
+
+RSpec.describe I18nContextGenerator::CLI do
+  def with_env(var, value)
+    original = ENV.fetch(var, nil)
+    value.nil? ? ENV.delete(var) : ENV[var] = value
+    yield
+  ensure
+    original.nil? ? ENV.delete(var) : ENV[var] = original
+  end
+
+  # rubocop:disable Style/RaiseArgs
+  def raise_system_exit(status)
+    raise SystemExit.new(status)
+  end
+  # rubocop:enable Style/RaiseArgs
+
+  it 'exits on failure and allows the OpenAI provider in the CLI option enum' do
+    expect(described_class.exit_on_failure?).to be true
+
+    provider_option = described_class.commands.fetch('extract').options.fetch(:provider)
+
+    expect(provider_option.enum).to eq(%w[anthropic openai])
+  end
+
+  describe 'option validation' do
+    let(:cli) { described_class.allocate }
+
+    before do
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+      allow(cli).to receive(:say_error)
+    end
+
+    it 'accepts an existing config file without requiring translations' do
+      Dir.mktmpdir do |dir|
+        config_path = File.join(dir, '.i18n-context-generator.yml')
+        File.write(config_path, "translations: []\n")
+
+        allow(cli).to receive(:options).and_return(config: config_path, translations: nil)
+
+        expect { cli.send(:validate_options!) }.not_to raise_error
+      end
+    end
+
+    it 'requires translations when no config file is provided' do
+      allow(cli).to receive(:options).and_return(config: nil, translations: nil)
+
+      expect { cli.send(:validate_options!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect(cli).to have_received(:say_error).with(/--translations \(-t\) is required/)
+    end
+  end
+
+  describe 'API key validation' do
+    let(:cli) { described_class.allocate }
+
+    before do
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+      allow(cli).to receive(:say_error)
+    end
+
+    it 'skips API key validation in dry-run mode' do
+      allow(cli).to receive(:options).and_return(dry_run: true)
+
+      expect { cli.send(:validate_api_key!) }.not_to raise_error
+    end
+
+    it 'requires OPENAI_API_KEY for the OpenAI provider' do
+      with_env('OPENAI_API_KEY', nil) do
+        allow(cli).to receive(:options).and_return(dry_run: false, provider: 'openai')
+
+        expect { cli.send(:validate_api_key!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+        expect(cli).to have_received(:say_error).with(/OPENAI_API_KEY environment variable is required/)
+      end
+    end
+  end
+
+  describe '#extract' do
+    let(:cli) { described_class.allocate }
+
+    it 'uses the provider from the loaded config when validating API keys' do
+      Dir.mktmpdir do |dir|
+        config_path = File.join(dir, '.i18n-context-generator.yml')
+        File.write(config_path, "llm:\n  provider: openai\n")
+
+        config = I18nContextGenerator::Config.new(translations: [], provider: 'openai')
+        extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+
+        allow(cli).to receive(:options).and_return(
+          config: config_path,
+          translations: nil,
+          provider: nil,
+          dry_run: false,
+          diff_base: nil
+        )
+        allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+        allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+        with_env('OPENAI_API_KEY', 'test-openai-key') do
+          with_env('ANTHROPIC_API_KEY', nil) do
+            expect { cli.extract }.not_to raise_error
+          end
+        end
+      end
+    end
+
+    it 'exits non-zero when extraction completes with errors' do
+      config = I18nContextGenerator::Config.new(translations: ['Localizable.strings'], dry_run: false)
+      errored_result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'API request failed',
+        error: 'timeout'
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [errored_result])
+
+      allow(cli).to receive(:options).and_return(
+        config: nil,
+        translations: 'Localizable.strings',
+        provider: 'anthropic',
+        dry_run: false,
+        diff_base: nil
+      )
+      allow(cli).to receive(:say_error)
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      with_env('ANTHROPIC_API_KEY', 'test-anthropic-key') do
+        expect { cli.extract }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      end
+
+      expect(cli).to have_received(:say_error).with('Completed with 1 extraction error(s).')
+    end
+  end
+
+  describe 'diff-base validation' do
+    let(:cli) { described_class.allocate }
+
+    before do
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+      allow(cli).to receive(:say_error)
+      allow(cli).to receive(:options).and_return(diff_base: 'origin/main')
+    end
+
+    it 'requires a git repository' do
+      allow(I18nContextGenerator::GitDiff).to receive(:available?).and_return(false)
+
+      expect { cli.send(:validate_diff_base!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect(cli).to have_received(:say_error).with(/requires a git repository/)
+    end
+
+    it 'requires the specified git ref to exist' do
+      git_diff = instance_double(I18nContextGenerator::GitDiff, base_ref_exists?: false)
+      allow(I18nContextGenerator::GitDiff).to receive(:available?).and_return(true)
+      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+
+      expect { cli.send(:validate_diff_base!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect(cli).to have_received(:say_error).with(%r{git ref 'origin/main' not found})
+    end
+  end
+end

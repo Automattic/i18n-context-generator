@@ -1,4 +1,4 @@
-# txcontext
+# i18n-context-generator
 
 A CLI tool that extracts contextual information from mobile app source code to improve translation quality. Uses AI to analyze how localized strings are used in your iOS and Android codebase and generates descriptions to help translators produce better translations.
 
@@ -14,9 +14,9 @@ A CLI tool that extracts contextual information from mobile app source code to i
 ## Installation
 
 ```bash
-cd txcontext
+cd i18n-context-generator
 bundle install
-chmod +x exe/txcontext
+chmod +x exe/i18n-context-generator
 ```
 
 ### Requirements
@@ -34,36 +34,36 @@ export ANTHROPIC_API_KEY=your-api-key
 # export OPENAI_API_KEY=your-api-key
 
 # iOS app
-bundle exec exe/txcontext extract \
+bundle exec exe/i18n-context-generator extract \
   -t ios/MyApp/Resources/Localizable.strings \
   -s ios/MyApp/
 
 # Android app
-bundle exec exe/txcontext extract \
+bundle exec exe/i18n-context-generator extract \
   -t android/app/src/main/res/values/strings.xml \
   -s android/app/src/main/java/
 
 # Dry run (preview without calling API)
-bundle exec exe/txcontext extract \
+bundle exec exe/i18n-context-generator extract \
   -t Localizable.strings \
   -s . \
   --dry-run
 
 # Write context back to source files
-bundle exec exe/txcontext extract \
+bundle exec exe/i18n-context-generator extract \
   -t Localizable.strings \
   -s . \
   --write-back
 ```
 
-Runs must target a single platform at a time. If a repository contains both iOS and Android code, run `txcontext` separately for each platform.
+Runs must target a single platform at a time. If a repository contains both iOS and Android code, run `i18n-context-generator` separately for each platform.
 
 ## Usage
 
 ### CLI Options
 
 ```
--c, --config CONFIG        Path to config file (.txcontext.yml)
+-c, --config CONFIG        Path to config file (.i18n-context-generator.yml)
 -t, --translations FILES   Translation file(s), comma-separated
 -s, --source DIRS          Source directory(ies) to search, comma-separated
 -o, --output PATH          Output file path (CSV only written if specified)
@@ -89,13 +89,13 @@ Runs must target a single platform at a time. If a repository contains both iOS 
 
 ```bash
 # Create a config file
-bundle exec exe/txcontext init
+bundle exec exe/i18n-context-generator init
 
 # Run with config
-bundle exec exe/txcontext extract --config .txcontext.yml
+bundle exec exe/i18n-context-generator extract --config .i18n-context-generator.yml
 ```
 
-Example `.txcontext.yml`:
+Example `.i18n-context-generator.yml`:
 
 ```yaml
 # Translation files to process
@@ -231,7 +231,7 @@ Use `--diff-base` to process only changed translation keys in a PR:
 
 ```bash
 # Process only keys changed since main branch
-txcontext extract \
+i18n-context-generator extract \
   -t Localizable.strings \
   -s ios/ \
   --diff-base origin/main \
@@ -244,7 +244,7 @@ Example GitHub Actions workflow:
 ```yaml
 - name: Add translation context
   run: |
-    txcontext extract \
+    i18n-context-generator extract \
       -t ios/Resources/Localizable.strings \
       -s ios/ \
       --diff-base origin/main \
@@ -254,7 +254,7 @@ Example GitHub Actions workflow:
 
 ## Caching
 
-Caching is **disabled by default**. When enabled, results are cached in `.txcontext-cache/` to avoid re-processing unchanged translations.
+Caching is **disabled by default**. When enabled, results are cached in `.i18n-context-generator-cache/` to avoid re-processing unchanged translations.
 
 To enable caching:
 - CLI: Use `--cache` flag
@@ -264,8 +264,8 @@ Cache is invalidated when the translation text changes.
 
 ## Comparison with Crowdin Context Harvester
 
-| Feature | txcontext | Crowdin Context Harvester |
-|---------|-----------|---------------------------|
+| Feature | i18n-context-generator | Crowdin Context Harvester |
+|---------|------------------------|---------------------------|
 | Platform focus | Mobile (iOS/Android) | General |
 | Vendor lock-in | None | Crowdin |
 | Write-back to source | Yes | No (uploads to Crowdin) |
@@ -274,6 +274,6 @@ Cache is invalidated when the translation text changes.
 
 ## License
 
-<a href="https://github.com/iangmaia/txcontext/blob/trunk/LICENSE">
-    <img alt="License" src="https://img.shields.io/github/license/iangmaia/txcontext">
+<a href="https://github.com/Automattic/i18n-context-generator/blob/trunk/LICENSE">
+    <img alt="License" src="https://img.shields.io/github/license/Automattic/i18n-context-generator">
 </a>

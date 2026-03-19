@@ -1,13 +1,13 @@
-# txcontext
+# i18n-context-generator
 
 Ruby CLI gem that extracts contextual information from mobile app source code to improve translation quality. Analyzes how localized strings are used in iOS/Android codebases and generates descriptions for translators.
 
 ## Architecture
 
 ```
-lib/txcontext/
+lib/i18n_context_generator/
 ├── cli.rb                 # Thor-based CLI entry point
-├── config.rb              # YAML config file loading (.txcontext.yml)
+├── config.rb              # YAML config file loading (.i18n-context-generator.yml)
 ├── context_extractor.rb   # Main orchestrator - ties everything together
 ├── searcher.rb            # Finds string usages in source code
 ├── cache.rb               # File-based caching for LLM results
@@ -31,7 +31,7 @@ lib/txcontext/
 
 ## Key Components
 
-### Searcher (`lib/txcontext/searcher.rb`)
+### Searcher (`lib/i18n_context_generator/searcher.rb`)
 
 Finds where translation keys are used in source code. Critical for providing context to the LLM.
 
@@ -66,7 +66,7 @@ The searcher handles this by:
 - `getString(R.string.key)` / `stringResource(R.string.key)`
 - Static import patterns: `string.key_name`
 
-### Context Extractor (`lib/txcontext/context_extractor.rb`)
+### Context Extractor (`lib/i18n_context_generator/context_extractor.rb`)
 
 Main orchestrator that:
 1. Loads translation keys from parser
@@ -75,7 +75,7 @@ Main orchestrator that:
 4. Sends context to LLM for analysis
 5. Writes results via writer
 
-### LLM Client (`lib/txcontext/llm/anthropic.rb`)
+### LLM Client (`lib/i18n_context_generator/llm/anthropic.rb`)
 
 Calls Claude API with structured output. The prompt includes:
 - The translation key and original text
@@ -90,19 +90,19 @@ The Anthropic client includes retry logic with exponential backoff for rate limi
 
 ```bash
 # Basic usage (no CSV output, no caching by default)
-bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources
+bundle exec exe/i18n-context-generator extract -t Localizable.strings -s ./Sources
 
 # With CSV output
-bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources -o context.csv
+bundle exec exe/i18n-context-generator extract -t Localizable.strings -s ./Sources -o context.csv
 
 # Dry run (no API calls)
-bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --dry-run
+bundle exec exe/i18n-context-generator extract -t Localizable.strings -s ./Sources --dry-run
 
 # Specific keys only
-bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --keys "Add a tracking,Save"
+bundle exec exe/i18n-context-generator extract -t Localizable.strings -s ./Sources --keys "Add a tracking,Save"
 
 # Enable caching (disabled by default)
-bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --cache
+bundle exec exe/i18n-context-generator extract -t Localizable.strings -s ./Sources --cache
 ```
 
 ## Ruby API
@@ -110,9 +110,9 @@ bundle exec exe/txcontext extract -t Localizable.strings -s ./Sources --cache
 For programmatic usage (e.g., fastlane integration), use the classes directly instead of shelling out to the CLI:
 
 ```ruby
-require 'txcontext'
+require 'i18n_context_generator'
 
-config = Txcontext::Config.new(
+config = I18nContextGenerator::Config.new(
   translations: ['/path/to/Localizable.strings'],
   source_paths: ['/path/to/Sources'],
   diff_base: 'origin/main',      # Only process changed keys
@@ -123,13 +123,13 @@ config = Txcontext::Config.new(
   # no_cache: false              # Optional: enable caching (disabled by default)
 )
 
-extractor = Txcontext::ContextExtractor.new(config)
+extractor = I18nContextGenerator::ContextExtractor.new(config)
 extractor.run
 ```
 
 ### Config Options
 
-Key `Txcontext::Config` parameters:
+Key `I18nContextGenerator::Config` parameters:
 - `translations`: Array of translation file paths
 - `source_paths`: Array of source code directories to search
 - `diff_base`: Git ref to compare against (only process changed keys)
@@ -155,8 +155,8 @@ bundle exec rspec
 Run specific spec files:
 
 ```bash
-bundle exec rspec spec/txcontext/searcher_spec.rb
-bundle exec rspec spec/txcontext/parsers/
+bundle exec rspec spec/i18n_context_generator/searcher_spec.rb
+bundle exec rspec spec/i18n_context_generator/parsers/
 ```
 
 ### Test Structure
@@ -164,7 +164,7 @@ bundle exec rspec spec/txcontext/parsers/
 ```
 spec/
 ├── spec_helper.rb
-└── txcontext/
+└── i18n_context_generator/
     ├── searcher_spec.rb              # Pattern matching, multi-line, false positives
     ├── config_spec.rb                # Config loading, CLI parsing, defaults
     └── parsers/
@@ -205,9 +205,9 @@ For ad-hoc searcher verification without running full specs:
 
 ```ruby
 $LOAD_PATH.unshift "lib"
-require "txcontext/searcher"
+require "i18n_context_generator/searcher"
 
-searcher = Txcontext::Searcher.new(
+searcher = I18nContextGenerator::Searcher.new(
   source_paths: ["test-fixtures/ios"],
   ignore_patterns: [],
   context_lines: 10,

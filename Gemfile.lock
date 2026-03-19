@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    txcontext (0.2.0)
+    i18n-context-generator (0.2.0)
       concurrent-ruby (~> 1.2)
       dotstrings (~> 0.6)
       oj (~> 3.16)
@@ -92,11 +92,11 @@ PLATFORMS
   ruby
 
 DEPENDENCIES
+  i18n-context-generator!
   rspec (~> 3.13)
   rubocop (~> 1.82)
   rubocop-rake
   rubocop-rspec
-  txcontext!
 
 BUNDLED WITH
    2.6.8

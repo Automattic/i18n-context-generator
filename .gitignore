@@ -9,7 +9,7 @@ vendor/bundle/
 coverage/
 
 # Project-specific
-.txcontext-cache
+.i18n-context-generator-cache
 translation-context.csv
 
 # Editor/IDE

@@ -2,7 +2,7 @@
 
 require 'bundler/setup'
 require 'tmpdir'
-require 'txcontext'
+require 'i18n_context_generator'
 
 RSpec.configure do |config|
   # Enable flags like --only-failures and --next-failure
