@@ -32,6 +32,27 @@ RSpec.describe Txcontext::Searcher do
 
           expect(matches).not_to be_empty
         end
+
+        it 'follows localization wrapper constants to actual UI usage sites' do
+          matches = searcher.search('wrapper.save')
+
+          expect(matches).not_to be_empty
+          expect(matches.first.file.end_with?('LocalizationWrapperView.swift')).to be true
+          expect(matches.first.match_line).to include('button.setTitle(Localization.save, for: .normal)')
+        end
+
+        it 'finds placeholder usage behind localization wrappers' do
+          matches = searcher.search('wrapper.note.placeholder')
+
+          expect(matches).not_to be_empty
+          expect(matches.first.match_line).to include('field.placeholder = Localization.notePlaceholder')
+        end
+
+        it 'does not pull unrelated multiline localization keys into wrapper usage matches' do
+          matches = searcher.search('wrapper.save')
+
+          expect(matches.any? { |m| m.file.end_with?('UnrelatedSaveString.swift') }).to be false
+        end
       end
 
       context 'with String(localized:) pattern' do

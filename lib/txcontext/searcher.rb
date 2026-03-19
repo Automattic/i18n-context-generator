@@ -29,6 +29,10 @@ module Txcontext
       unknown: %w[.swift .m .mm .h .kt .java .xml].freeze
     }.freeze
 
+    IOS_WRAPPER_DEFINITION_PATTERN =
+      /\b(static\s+)?(?:let|var)\s+(\w+)\s*=\s*(?:NSLocalizedString|String\s*\(\s*localized:|LocalizedStringKey\s*\(|Text\s*\()/
+    IOS_TYPE_DECLARATION_PATTERN = /\b(class|struct|enum|extension)\s+(\w+)/
+
     def initialize(source_paths:, ignore_patterns:, context_lines: 15, platform: nil)
       @source_paths = source_paths
       @ignore_patterns = compile_ignore_patterns(ignore_patterns)
@@ -37,17 +41,24 @@ module Txcontext
 
       # Cache discovered files for repeated searches
       @files_cache = nil
+      @file_lines_cache = {}
     end
 
     def search(key)
       patterns = build_search_patterns(key)
       files = discover_files
-      all_matches = []
+      direct_matches = []
 
       files.each do |file|
         matches = search_file(file, patterns, key)
-        all_matches.concat(matches)
+        direct_matches.concat(matches)
       end
+
+      all_matches = if @platform == :ios
+                      search_ios_wrapper_usages(direct_matches, files) + direct_matches
+                    else
+                      direct_matches
+                    end
 
       filter_matches(all_matches, key)
     end
@@ -119,7 +130,7 @@ module Txcontext
       @ignore_patterns.any? { |pattern| pattern.match?(file) }
     end
 
-    def search_file(file, patterns, key)
+    def search_file(file, patterns, key, enable_multiline: true)
       matches = []
       lines = []
       match_indices = Set.new
@@ -135,7 +146,7 @@ module Txcontext
 
       # For iOS files, also check for multi-line NSLocalizedString patterns
       # where the function call and key are on different lines
-      if @platform == :ios && file.end_with?('.swift', '.m', '.mm', '.h')
+      if enable_multiline && @platform == :ios && file.end_with?('.swift', '.m', '.mm', '.h')
         multiline_matches = find_multiline_ios_matches(lines, patterns, key)
         match_indices.merge(multiline_matches)
       end
@@ -163,6 +174,66 @@ module Txcontext
       return [] if e.message.include?('invalid byte sequence')
 
       raise
+    end
+
+    def search_ios_wrapper_usages(direct_matches, files)
+      references = direct_matches.filter_map do |match|
+        ios_wrapper_reference(match)
+      end.uniq
+
+      references.flat_map do |reference|
+        wrapper_pattern = [Regexp.new("\\b#{Regexp.escape(reference[:type_name])}\\.#{Regexp.escape(reference[:member_name])}\\b")]
+        files.flat_map do |file|
+          search_file(file, wrapper_pattern, reference[:member_name], enable_multiline: false).reject do |match|
+            match.file == reference[:definition_file] && match.line == reference[:definition_line]
+          end
+        end
+      end
+    end
+
+    def ios_wrapper_reference(match)
+      return unless File.extname(match.file).downcase == '.swift'
+
+      lines = cached_file_lines(match.file)
+      definition_index = find_ios_wrapper_definition_index(lines, match.line - 1)
+      return unless definition_index
+
+      definition_line = lines[definition_index]
+      definition_match = IOS_WRAPPER_DEFINITION_PATTERN.match(definition_line)
+      return unless definition_match&.captures&.first
+
+      type_name = find_nearest_ios_type_name(lines, definition_index)
+      return unless type_name
+
+      {
+        type_name: type_name,
+        member_name: definition_match[2],
+        definition_file: match.file,
+        definition_line: definition_index + 1
+      }
+    end
+
+    def cached_file_lines(file)
+      @file_lines_cache[file] ||= File.readlines(file, chomp: true)
+    end
+
+    def find_ios_wrapper_definition_index(lines, match_index, lookback: 5)
+      start_idx = [0, match_index - lookback].max
+
+      match_index.downto(start_idx) do |index|
+        return index if IOS_WRAPPER_DEFINITION_PATTERN.match?(lines[index])
+      end
+
+      nil
+    end
+
+    def find_nearest_ios_type_name(lines, index)
+      index.downto(0) do |i|
+        match = IOS_TYPE_DECLARATION_PATTERN.match(lines[i])
+        return match[2] if match
+      end
+
+      nil
     end
 
     # Find matches where localization calls span multiple lines

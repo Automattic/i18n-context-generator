@@ -14,7 +14,7 @@ module Txcontext
 
     # Base class for LLM clients
     class Client
-      SYSTEM_PROMPT = 'You are a mobile app localization expert. Analyze code usage and provide concise, specific context for translators. Respond with only valid JSON.'
+      SYSTEM_PROMPT = 'You are a mobile app localization expert. Analyze only the provided evidence and provide concise, specific context for translators. Respond with only valid JSON.'
 
       def self.for(provider)
         case provider.to_s.downcase
@@ -64,7 +64,8 @@ module Txcontext
           - Ignore boolean/string comparisons (e.g., `if value == "yes"` is not UI usage)
           - Ignore analytics event names or tracking parameters
           - Focus on localization patterns: getString(), NSLocalizedString(), Text(), @string/, R.string., etc.
-          - If no clear UI usage is found in the code, base your description on the text itself and common mobile UI patterns
+          - If no clear UI usage is found in the code, base your description only on the provided text, developer comment, and key name
+          - If evidence is limited, keep the description generic rather than inventing a specific screen, flow, or user action
 
           Focus on:
           1. **Where it appears**: What screen or view displays this text?
@@ -81,6 +82,10 @@ module Txcontext
           - Be SPECIFIC about WHERE and HOW the text is used, not just what it means
           - Avoid vague descriptions like "used throughout the app" - identify specific screens/features
           - If the text is a common UI term (Save, Cancel, OK), describe its specific usage context in THIS app
+          - Do not speculate or hedge. Never use words like "likely", "probably", "appears", "seems", "may", or "might"
+          - Only mention screens, features, or actions when they are supported by the provided code, comment, text, or key name
+          - Only set `max_length` when there is explicit evidence for a concrete numeric limit; otherwise return null
+          - Do not infer `max_length` from general UI conventions like buttons, badges, placeholders, or navigation bars
           - Don't mention code implementation details - focus on the user-facing experience
 
           Respond with ONLY a JSON object (no markdown, no explanation):
@@ -88,7 +93,7 @@ module Txcontext
             "description": "Concise context for translators (1-2 sentences)",
             "ui_element": "button|label|title|alert|toast|placeholder|navigation|menu|tab|error|confirmation|other",
             "tone": "formal|casual|urgent|friendly|technical|neutral",
-            "max_length": null or number if there's an apparent character limit
+            "max_length": null or a number only when explicit evidence gives a concrete numeric limit
           }
         PROMPT
       end

@@ -75,6 +75,18 @@ RSpec.describe Txcontext::LLM::Client do
     expect(prompt).not_to include('Contact mobile@example.com for support')
   end
 
+  it 'instructs the model not to speculate or infer max length' do
+    prompt = client.prompt_for(
+      key: 'settings.title',
+      text: 'Settings',
+      matches: [match]
+    )
+
+    expect(prompt).to include('Never use words like "likely", "probably", "appears", "seems", "may", or "might"')
+    expect(prompt).to include('Only set `max_length` when there is explicit evidence for a concrete numeric limit; otherwise return null')
+    expect(prompt).to include('keep the description generic rather than inventing a specific screen, flow, or user action')
+  end
+
   describe '.for' do
     it 'builds an Anthropic client' do
       anthropic_client = instance_double(Txcontext::LLM::Anthropic)
