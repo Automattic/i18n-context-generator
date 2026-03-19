@@ -16,7 +16,7 @@ module Txcontext
         return unless File.exist?(source_path)
 
         lines = File.readlines(source_path, encoding: 'UTF-8')
-        results_by_key = build_results_lookup(results)
+        results_by_key = build_results_lookup(results, source_path)
 
         output_lines = []
         i = 0
@@ -34,7 +34,7 @@ module Txcontext
             key = match[2]
             result = results_by_key[key]
 
-            insert_context_comment(output_lines, indent, result.description) if result&.description && !skip_description?(result.description)
+            insert_context_comment(output_lines, indent, result.description) if writable_result?(result)
           end
 
           output_lines << line
@@ -52,9 +52,11 @@ module Txcontext
       # Standard string keys map directly.
       # Results are sorted by key first so the lookup is deterministic regardless
       # of concurrent execution order.
-      def build_results_lookup(results)
+      def build_results_lookup(results, source_path = nil)
         lookup = {}
         results.sort_by(&:key).each do |r|
+          next if source_path && !result_matches_source_path?(r, source_path)
+
           base = r.key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
           lookup[base] ||= r
           lookup[r.key] ||= r

@@ -59,10 +59,9 @@ module Txcontext
 
     def extract
       validate_options!
-      validate_api_key!
-      validate_diff_base! if options[:diff_base]
-
       config = Config.load(options)
+      validate_api_key!(provider: config.provider, dry_run: config.dry_run)
+      validate_diff_base!(base_ref: config.diff_base) if config.diff_base
       extractor = ContextExtractor.new(config)
       extractor.run
     rescue Txcontext::Error => e
@@ -106,10 +105,10 @@ module Txcontext
       exit 1
     end
 
-    def validate_api_key!
-      return if options[:dry_run]
+    def validate_api_key!(provider: nil, dry_run: nil)
+      return if dry_run.nil? ? options[:dry_run] : dry_run
 
-      provider = options[:provider] || 'anthropic'
+      provider ||= options[:provider] || 'anthropic'
       env_var = case provider
                 when 'anthropic' then 'ANTHROPIC_API_KEY'
                 when 'openai' then 'OPENAI_API_KEY'
@@ -123,16 +122,16 @@ module Txcontext
       exit 1
     end
 
-    def validate_diff_base!
+    def validate_diff_base!(base_ref: options[:diff_base])
       unless GitDiff.available?
         say_error 'Error: --diff-base requires a git repository'
         exit 1
       end
 
-      git_diff = GitDiff.new(base_ref: options[:diff_base])
+      git_diff = GitDiff.new(base_ref: base_ref)
       return if git_diff.base_ref_exists?
 
-      say_error "Error: git ref '#{options[:diff_base]}' not found"
+      say_error "Error: git ref '#{base_ref}' not found"
       say_error 'Try: origin/main, main, or a specific commit SHA'
       exit 1
     end

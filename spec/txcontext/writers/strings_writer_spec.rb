@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 RSpec.describe Txcontext::Writers::StringsWriter do
-  def build_result(key, description)
+  def build_result(key, description, source_file: nil, error: nil)
     Txcontext::ContextExtractor::ExtractionResult.new(
       key: key,
       text: 'text',
-      description: description
+      description: description,
+      source_file: source_file,
+      error: error
     )
   end
 
@@ -90,6 +92,41 @@ RSpec.describe Txcontext::Writers::StringsWriter do
 
     it 'returns nil for missing files' do
       expect(described_class.new.write([], '/nonexistent/Localizable.strings')).to be_nil
+    end
+
+    it 'skips errored results and leaves comments unchanged' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, <<~STRINGS)
+          /* Manual note */
+          "settings.title" = "Settings";
+        STRINGS
+
+        described_class.new.write([build_result('settings.title', 'API error', error: 'timeout')], path)
+
+        expect(parsed_comments(path)['settings.title']).to eq('Manual note')
+      end
+    end
+
+    it 'scopes duplicate keys by source file' do
+      Dir.mktmpdir do |dir|
+        english_path = File.join(dir, 'en.strings')
+        spanish_path = File.join(dir, 'es.strings')
+        File.write(english_path, '"greeting" = "Hello";')
+        File.write(spanish_path, '"greeting" = "Hola";')
+
+        results = [
+          build_result('greeting', 'English context', source_file: english_path),
+          build_result('greeting', 'Spanish context', source_file: spanish_path)
+        ]
+
+        writer = described_class.new
+        writer.write(results, english_path)
+        writer.write(results, spanish_path)
+
+        expect(parsed_comments(english_path)['greeting']).to eq('Context: English context')
+        expect(parsed_comments(spanish_path)['greeting']).to eq('Context: Spanish context')
+      end
     end
   end
 end

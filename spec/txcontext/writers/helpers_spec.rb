@@ -18,6 +18,29 @@ RSpec.describe Txcontext::Writers::Helpers do
     end
   end
 
+  describe '#writable_result?' do
+    it 'rejects errored results' do
+      result = Txcontext::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'API error',
+        error: 'timeout'
+      )
+
+      expect(helper_host.writable_result?(result)).to be false
+    end
+
+    it 'accepts valid results' do
+      result = Txcontext::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Navigation title for settings'
+      )
+
+      expect(helper_host.writable_result?(result)).to be true
+    end
+  end
+
   describe '#find_swift_files' do
     it 'returns a single Swift file when given a file path' do
       Dir.mktmpdir do |dir|
@@ -51,6 +74,22 @@ RSpec.describe Txcontext::Writers::Helpers do
 
         expect(helper_host.find_swift_files(File.join(dir, 'missing'))).to eq([])
         expect(helper_host.find_swift_files(text_file)).to eq([])
+      end
+    end
+
+    it 'applies ignore patterns' do
+      Dir.mktmpdir do |dir|
+        included_dir = File.join(dir, 'App')
+        ignored_dir = File.join(dir, 'Pods')
+        included_file = File.join(included_dir, 'Feature.swift')
+        ignored_file = File.join(ignored_dir, 'Vendor.swift')
+
+        FileUtils.mkdir_p(included_dir)
+        FileUtils.mkdir_p(ignored_dir)
+        File.write(included_file, 'struct Feature {}')
+        File.write(ignored_file, 'struct Vendor {}')
+
+        expect(helper_host.find_swift_files(dir, ignore_patterns: ['**/Pods/**'])).to eq([included_file])
       end
     end
   end

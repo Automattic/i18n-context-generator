@@ -11,6 +11,12 @@ RSpec.describe Txcontext::CLI do
     original.nil? ? ENV.delete(var) : ENV[var] = original
   end
 
+  # rubocop:disable Style/RaiseArgs
+  def raise_system_exit(status)
+    raise SystemExit.new(status)
+  end
+  # rubocop:enable Style/RaiseArgs
+
   it 'exits on failure and allows the OpenAI provider in the CLI option enum' do
     expect(described_class.exit_on_failure?).to be true
 
@@ -23,7 +29,7 @@ RSpec.describe Txcontext::CLI do
     let(:cli) { described_class.allocate }
 
     before do
-      allow(cli).to receive(:exit) { |status| raise SystemExit.new(status) }
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
       allow(cli).to receive(:say_error)
     end
 
@@ -50,7 +56,7 @@ RSpec.describe Txcontext::CLI do
     let(:cli) { described_class.allocate }
 
     before do
-      allow(cli).to receive(:exit) { |status| raise SystemExit.new(status) }
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
       allow(cli).to receive(:say_error)
     end
 
@@ -70,11 +76,41 @@ RSpec.describe Txcontext::CLI do
     end
   end
 
+  describe '#extract' do
+    let(:cli) { described_class.allocate }
+
+    it 'uses the provider from the loaded config when validating API keys' do
+      Dir.mktmpdir do |dir|
+        config_path = File.join(dir, '.txcontext.yml')
+        File.write(config_path, "llm:\n  provider: openai\n")
+
+        config = Txcontext::Config.new(translations: [], provider: 'openai')
+        extractor = instance_double(Txcontext::ContextExtractor, run: nil)
+
+        allow(cli).to receive(:options).and_return(
+          config: config_path,
+          translations: nil,
+          provider: nil,
+          dry_run: false,
+          diff_base: nil
+        )
+        allow(Txcontext::Config).to receive(:load).with(cli.options).and_return(config)
+        allow(Txcontext::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+        with_env('OPENAI_API_KEY', 'test-openai-key') do
+          with_env('ANTHROPIC_API_KEY', nil) do
+            expect { cli.extract }.not_to raise_error
+          end
+        end
+      end
+    end
+  end
+
   describe 'diff-base validation' do
     let(:cli) { described_class.allocate }
 
     before do
-      allow(cli).to receive(:exit) { |status| raise SystemExit.new(status) }
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
       allow(cli).to receive(:say_error)
       allow(cli).to receive(:options).and_return(diff_base: 'origin/main')
     end
@@ -92,7 +128,7 @@ RSpec.describe Txcontext::CLI do
       allow(Txcontext::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
 
       expect { cli.send(:validate_diff_base!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
-      expect(cli).to have_received(:say_error).with(/git ref 'origin\/main' not found/)
+      expect(cli).to have_received(:say_error).with(%r{git ref 'origin/main' not found})
     end
   end
 end

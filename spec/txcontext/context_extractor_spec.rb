@@ -198,11 +198,13 @@ RSpec.describe Txcontext::ContextExtractor do
       entries = (1..21).map { |i| build_entry("key_#{i}", 'x' * 60) }
 
       allow(extractor).to receive(:load_translations).and_return(entries)
-      expect(extractor).not_to receive(:process_entries)
+      allow(extractor).to receive(:process_entries)
 
       expect { extractor.run }
         .to output(/Loaded 21 translation keys.*Dry run - would process these keys:.*\.\.\. and 1 more/m)
         .to_stdout
+
+      expect(extractor).not_to have_received(:process_entries)
     end
   end
 
@@ -274,7 +276,17 @@ RSpec.describe Txcontext::ContextExtractor do
       )
 
       allow(cache).to receive(:get).and_return(nil)
-      expect(llm).to receive(:generate_context).with(
+      allow(llm).to receive(:generate_context).and_return(llm_result)
+      cache_write = nil
+      allow(cache).to receive(:set) do |key, text, result, context:|
+        cache_write = { key: key, text: text, result: result, context: context }
+      end
+
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      result = extractor.send(:process_entry, entry)
+
+      expect(llm).to have_received(:generate_context).with(
         key: 'settings.title',
         text: 'Settings',
         matches: [match_one, match_two],
@@ -282,23 +294,15 @@ RSpec.describe Txcontext::ContextExtractor do
         comment: 'Shown in the settings navigation bar',
         include_file_paths: false,
         redact_prompts: true
-      ).and_return(llm_result)
-      expect(cache).to receive(:set) do |key, text, result, context:|
-        expect(key).to eq('settings.title')
-        expect(text).to eq('Settings')
-        expect(result[:description]).to eq('Navigation title for the settings screen')
-        expect(context).to include('comment:Shown in the settings navigation bar')
-        expect(context).to include('model:gpt-5-mini')
-        expect(context).to include('include_file_paths:false')
-        expect(context).to include('redact_prompts:true')
-      end
-
-      allow(extractor).to receive(:searcher).and_return(searcher)
-      allow(extractor).to receive(:cache).and_return(cache)
-      allow(extractor).to receive(:llm).and_return(llm)
-
-      result = extractor.send(:process_entry, entry)
-
+      )
+      expect(cache_write[:key]).to eq('settings.title')
+      expect(cache_write[:text]).to eq('Settings')
+      expect(cache_write[:result][:description]).to eq('Navigation title for the settings screen')
+      expect(cache_write[:context]).to include('comment:Shown in the settings navigation bar')
+      expect(cache_write[:context]).to include('provider:anthropic')
+      expect(cache_write[:context]).to include('model:gpt-5-mini')
+      expect(cache_write[:context]).to include('include_file_paths:false')
+      expect(cache_write[:context]).to include('redact_prompts:true')
       expect(result.description).to eq('Navigation title for the settings screen')
       expect(result.locations).to eq(
         ['/tmp/SettingsViewController.swift:10', '/tmp/SettingsHeaderView.swift:18']
@@ -315,15 +319,15 @@ RSpec.describe Txcontext::ContextExtractor do
       cache = instance_double(Txcontext::Cache, get: nil, set: nil)
       llm = instance_double(Txcontext::LLM::OpenAI)
 
-      expect(llm).to receive(:generate_context).with(hash_including(comment: nil)).and_return(
+      allow(llm).to receive(:generate_context).and_return(
         Txcontext::LLM::ContextResult.new(description: 'Settings title')
       )
 
-      allow(extractor).to receive(:searcher).and_return(searcher)
-      allow(extractor).to receive(:cache).and_return(cache)
-      allow(extractor).to receive(:llm).and_return(llm)
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
 
       extractor.send(:process_entry, entry)
+
+      expect(llm).to have_received(:generate_context).with(hash_including(comment: nil))
     end
 
     it 'returns cached results without calling the llm again' do
@@ -339,15 +343,48 @@ RSpec.describe Txcontext::ContextExtractor do
       )
       llm = instance_double(Txcontext::LLM::OpenAI)
 
-      allow(extractor).to receive(:searcher).and_return(searcher)
-      allow(extractor).to receive(:cache).and_return(cache)
-      allow(extractor).to receive(:llm).and_return(llm)
-      expect(llm).not_to receive(:generate_context)
+      allow(llm).to receive(:generate_context)
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
 
       result = extractor.send(:process_entry, entry)
 
+      expect(llm).not_to have_received(:generate_context)
       expect(result.description).to eq('Cached description')
       expect(result.locations).to eq(['/tmp/SettingsViewController.swift:10'])
+    end
+  end
+
+  describe '#write_back_to_code' do
+    it 'skips ignored Swift files' do
+      Dir.mktmpdir do |dir|
+        pods_dir = File.join(dir, 'Pods')
+        app_dir = File.join(dir, 'App')
+        ignored_file = File.join(pods_dir, 'Ignored.swift')
+        app_file = File.join(app_dir, 'Main.swift')
+
+        FileUtils.mkdir_p(pods_dir)
+        FileUtils.mkdir_p(app_dir)
+        File.write(ignored_file, 'let title = NSLocalizedString("settings.title", comment: "old")')
+        File.write(app_file, 'let title = NSLocalizedString("settings.title", comment: "old")')
+
+        config = Txcontext::Config.new(
+          translations: [],
+          source_paths: [dir],
+          ignore_patterns: ['**/Pods/**'],
+          write_back_to_code: true
+        )
+        extractor = described_class.new(config)
+        extractor.results << described_class::ExtractionResult.new(
+          key: 'settings.title',
+          text: 'Settings',
+          description: 'Updated context'
+        )
+
+        extractor.send(:write_back_to_code)
+
+        expect(File.read(ignored_file)).to include('comment: "old"')
+        expect(File.read(app_file)).to include('comment: "Context: Updated context"')
+      end
     end
   end
 

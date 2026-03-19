@@ -39,6 +39,7 @@ module Txcontext
       def build_prompt(key:, text:, matches:, comment: nil,
                        include_file_paths: false, redact_prompts: true)
         platform = detect_platform(matches)
+        safe_text = sanitize_prompt_text(text, redact: redact_prompts)
         safe_comment = sanitize_prompt_text(comment, redact: redact_prompts)
         placeholder_info = detect_placeholders(text)
 
@@ -49,7 +50,7 @@ module Txcontext
           `#{key}`
 
           ## Original Text
-          "#{text}"
+          "#{safe_text}"
           #{"\n## Developer Comment\n\"#{safe_comment}\"\n" if safe_comment && !safe_comment.strip.empty?}#{"\n## Format Placeholders\n#{placeholder_info}\n" if placeholder_info}
           ## Code Usage
           #{format_matches(matches, include_file_paths: include_file_paths, redact_prompts: redact_prompts)}

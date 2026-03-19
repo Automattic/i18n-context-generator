@@ -7,9 +7,9 @@ module Txcontext
     include Writers::Helpers
 
     # Result for a single translation key
-    ExtractionResult = Data.define(:key, :text, :description, :ui_element, :tone,
+    ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
                                    :max_length, :locations, :error) do
-      def initialize(key:, text:, description:, ui_element: nil, tone: nil,
+      def initialize(key:, text:, description:, source_file: nil, ui_element: nil, tone: nil,
                      max_length: nil, locations: [], error: nil)
         super
       end
@@ -19,6 +19,7 @@ module Txcontext
           key: key,
           text: text,
           description: description,
+          source_file: source_file,
           ui_element: ui_element,
           tone: tone,
           max_length: max_length,
@@ -101,7 +102,7 @@ module Txcontext
     end
 
     def load_translations
-      @config.translations.flat_map do |path|
+      @config.translations.uniq.flat_map do |path|
         unless File.exist?(path)
           warn "Translation file not found: #{path}"
           next []
@@ -206,6 +207,7 @@ module Txcontext
               key: entry.key,
               text: entry.text,
               description: 'Processing failed',
+              source_file: entry.source_file,
               error: e.message
             )
             @results << result
@@ -232,6 +234,7 @@ module Txcontext
           key: entry.key,
           text: entry.text,
           description: 'No usage found in source code',
+          source_file: entry.source_file,
           locations: []
         )
       end
@@ -244,6 +247,7 @@ module Txcontext
       cache_ctx = [
         matches.map { |m| "#{m.file}:#{m.line}:#{m.match_line}:#{m.enclosing_scope}:#{m.context}" }.sort.join("\0"),
         "comment:#{comment}",
+        "provider:#{@config.provider}",
         "model:#{@config.model}",
         "include_file_paths:#{@config.include_file_paths}",
         "redact_prompts:#{@config.redact_prompts}"
@@ -251,7 +255,7 @@ module Txcontext
 
       # Check cache with match context included
       if (cached = cache.get(entry.key, entry.text, context: cache_ctx))
-        return ExtractionResult.new(**cached.transform_keys(&:to_sym))
+        return ExtractionResult.new(source_file: entry.source_file, **cached.transform_keys(&:to_sym))
       end
 
       # Get context from LLM
@@ -269,6 +273,7 @@ module Txcontext
         key: entry.key,
         text: entry.text,
         description: llm_result.description,
+        source_file: entry.source_file,
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
@@ -276,7 +281,7 @@ module Txcontext
         error: llm_result.error
       )
 
-      cache.set(entry.key, entry.text, result.to_h, context: cache_ctx)
+      cache.set(entry.key, entry.text, result.to_h.except(:source_file), context: cache_ctx)
       result
     end
 
@@ -298,7 +303,10 @@ module Txcontext
         writer = source_writer_for(path)
         next unless writer
 
-        writer.write(@results, path)
+        relevant_results = @results.select { |result| result_matches_source_path?(result, path) }
+        next if relevant_results.empty?
+
+        writer.write(relevant_results, path)
         puts "Updated #{path} with context comments"
       end
     end
@@ -311,10 +319,10 @@ module Txcontext
       )
 
       updated_count = 0
-      results_by_key = @results.to_h { |r| [r.key, r] }
+      results_by_key = build_results_by_key_for_code_write_back
 
       @config.source_paths.each do |source_path|
-        swift_files = find_swift_files(source_path)
+        swift_files = find_swift_files(source_path, ignore_patterns: @config.ignore_patterns)
 
         swift_files.each do |swift_file|
           if swift_writer.update_file(swift_file, results_by_key)
@@ -325,6 +333,23 @@ module Txcontext
       end
 
       puts "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
+    end
+
+    def build_results_by_key_for_code_write_back
+      @results
+        .sort_by { |result| [translation_source_priority(result.source_file), result.key] }
+        .each_with_object({}) do |result, lookup|
+          next unless writable_result?(result)
+
+          lookup[result.key] ||= result
+        end
+    end
+
+    def translation_source_priority(source_file)
+      return @config.translations.size unless source_file
+
+      index = @config.translations.index(source_file)
+      index || @config.translations.size
     end
 
     def source_writer_for(path)

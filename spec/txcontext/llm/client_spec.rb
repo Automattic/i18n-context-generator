@@ -64,6 +64,17 @@ RSpec.describe Txcontext::LLM::Client do
     expect(prompt).to include('https://internal.example.com/settings')
   end
 
+  it 'redacts the original translation text when prompt redaction is enabled' do
+    prompt = client.prompt_for(
+      key: 'support.email',
+      text: 'Contact mobile@example.com for support',
+      matches: [match]
+    )
+
+    expect(prompt).to include('[REDACTED_EMAIL]')
+    expect(prompt).not_to include('Contact mobile@example.com for support')
+  end
+
   describe '.for' do
     it 'builds an Anthropic client' do
       anthropic_client = instance_double(Txcontext::LLM::Anthropic)

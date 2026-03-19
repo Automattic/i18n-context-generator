@@ -28,11 +28,11 @@ module Txcontext
       # Write context back to all Swift files that contain the keys
       # @param results [Array] extraction results with key and description
       # @param source_paths [Array<String>] paths to search for Swift files
-      def write_to_source_files(results, source_paths)
+      def write_to_source_files(results, source_paths, ignore_patterns: [])
         results_by_key = results.to_h { |r| [r.key, r] }
 
         source_paths.each do |source_path|
-          swift_files = find_swift_files(source_path)
+          swift_files = find_swift_files(source_path, ignore_patterns: ignore_patterns)
 
           swift_files.each do |swift_file|
             update_file(swift_file, results_by_key)
@@ -51,8 +51,7 @@ module Txcontext
         updated = false
 
         results_by_key.each do |key, result|
-          next unless result&.description
-          next if skip_description?(result.description)
+          next unless writable_result?(result)
 
           new_content = update_comment_for_key(content, key, result.description)
           if new_content != content

@@ -191,10 +191,11 @@ error.network,Unable to connect,Error message shown when network requests fail,a
 
 **After**:
 ```
-/* Settings screen title
-Context: Navigation bar title for the main settings screen */
+/* Context: Navigation bar title for the main settings screen */
 "settings.title" = "Settings";
 ```
+
+If you want to preserve existing manual comments and append generated context instead, use `--context-mode append`.
 
 #### Swift Source Code (`--write-back-to-code`)
 

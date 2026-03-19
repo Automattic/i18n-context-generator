@@ -17,7 +17,11 @@ module Txcontext
 
         # Parse the existing file
         original_file = DotStrings.parse_file(source_path, strict: false)
-        results_by_key = results.to_h { |r| [r.key, r] }
+        results_by_key = results.each_with_object({}) do |result, lookup|
+          next unless result_matches_source_path?(result, source_path)
+
+          lookup[result.key] = result
+        end
 
         # Build new file with updated comments (DotStrings::Item is immutable)
         new_file = DotStrings::File.new
@@ -25,7 +29,7 @@ module Txcontext
         original_file.items.each do |item|
           result = results_by_key[item.key]
 
-          new_comment = if result&.description && !skip_description?(result.description)
+          new_comment = if writable_result?(result)
                           build_comment(item.comment, result.description)
                         else
                           item.comment

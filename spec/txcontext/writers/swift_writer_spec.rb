@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.describe Txcontext::Writers::SwiftWriter do
-  def build_result(key, description)
+  def build_result(key, description, error: nil)
     Txcontext::ContextExtractor::ExtractionResult.new(
-      key: key, text: 'text', description: description
+      key: key, text: 'text', description: description, error: error
     )
   end
 
@@ -105,6 +105,21 @@ RSpec.describe Txcontext::Writers::SwiftWriter do
         File.write(path, original)
 
         results = { 'k' => build_result('k', 'No usage found in source code') }
+        writer = described_class.new
+
+        writer.update_file(path, results)
+
+        expect(File.read(path)).to eq(original)
+      end
+    end
+
+    it 'skips errored descriptions' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Test.swift')
+        original = 'let t = NSLocalizedString("k", comment: "keep this")'
+        File.write(path, original)
+
+        results = { 'k' => build_result('k', 'API error', error: 'timeout') }
         writer = described_class.new
 
         writer.update_file(path, results)

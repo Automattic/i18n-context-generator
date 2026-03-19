@@ -59,14 +59,21 @@ module Txcontext
         next unless File.exist?(path)
 
         if File.directory?(path)
-          # Use Find with early return to avoid globbing entire trees
           Find.find(path) do |f|
-            return :ios if f.end_with?('.swift', '.m', '.mm')
+            if File.directory?(f) && ignored?(f)
+              Find.prune
+              next
+            end
+
+            next unless File.file?(f)
+            next if ignored?(f)
+
+            return :ios if f.end_with?('.swift', '.m', '.mm', '.h')
             return :android if f.end_with?('.kt', '.java')
           end
-        elsif path.end_with?('.swift', '.m', '.mm')
+        elsif !ignored?(path) && path.end_with?('.swift', '.m', '.mm', '.h')
           return :ios
-        elsif path.end_with?('.kt', '.java')
+        elsif !ignored?(path) && path.end_with?('.kt', '.java')
           return :android
         end
       end
@@ -199,7 +206,7 @@ module Txcontext
       end_idx = [lines.length - 1, match_index + @context_lines].min
 
       context_parts = (start_idx..end_idx).map do |i|
-        (i == match_index ? ">>> #{lines[i]}" : lines[i])
+        i == match_index ? ">>> #{lines[i]}" : lines[i]
       end
 
       context_parts.join("\n")

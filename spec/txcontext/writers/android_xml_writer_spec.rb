@@ -1,9 +1,9 @@
 # frozen_string_literal: true
 
 RSpec.describe Txcontext::Writers::AndroidXmlWriter do
-  def build_result(key, description)
+  def build_result(key, description, source_file: nil, error: nil)
     Txcontext::ContextExtractor::ExtractionResult.new(
-      key: key, text: 'text', description: description
+      key: key, text: 'text', description: description, source_file: source_file, error: error
     )
   end
 
@@ -129,6 +129,55 @@ RSpec.describe Txcontext::Writers::AndroidXmlWriter do
         output = File.read(path)
 
         expect(output).not_to include('<!-- Context:')
+      end
+    end
+
+    it 'skips errored results' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+              <string name="unused_key">Unused</string>
+          </resources>
+        XML
+
+        results = [build_result('unused_key', 'API error', error: 'timeout')]
+
+        described_class.new.write(results, path)
+
+        expect(File.read(path)).not_to include('<!-- Context:')
+      end
+    end
+
+    it 'scopes duplicate keys by source file' do
+      Dir.mktmpdir do |dir|
+        english_path = File.join(dir, 'values-en', 'strings.xml')
+        spanish_path = File.join(dir, 'values-es', 'strings.xml')
+
+        FileUtils.mkdir_p(File.dirname(english_path))
+        FileUtils.mkdir_p(File.dirname(spanish_path))
+        File.write(english_path, <<~XML)
+          <resources>
+              <string name="greeting">Hello</string>
+          </resources>
+        XML
+        File.write(spanish_path, <<~XML)
+          <resources>
+              <string name="greeting">Hola</string>
+          </resources>
+        XML
+
+        results = [
+          build_result('greeting', 'English greeting', source_file: english_path),
+          build_result('greeting', 'Spanish greeting', source_file: spanish_path)
+        ]
+
+        writer = described_class.new
+        writer.write(results, english_path)
+        writer.write(results, spanish_path)
+
+        expect(File.read(english_path)).to include('<!-- Context: English greeting -->')
+        expect(File.read(spanish_path)).to include('<!-- Context: Spanish greeting -->')
       end
     end
   end

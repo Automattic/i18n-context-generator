@@ -285,6 +285,29 @@ RSpec.describe Txcontext::Searcher do
       matches = searcher.search('settings_title')
       expect(matches).not_to be_empty
     end
+
+    it 'ignores excluded files when auto-detecting the platform' do
+      Dir.mktmpdir do |dir|
+        ignored_dir = File.join(dir, 'build')
+        source_dir = File.join(dir, 'Sources')
+        ignored_android = File.join(ignored_dir, 'Ignored.kt')
+        swift_file = File.join(source_dir, 'ViewController.swift')
+
+        FileUtils.mkdir_p(ignored_dir)
+        FileUtils.mkdir_p(source_dir)
+        File.write(ignored_android, 'class Ignored { fun render() { getString(R.string.settings_title) } }')
+        File.write(swift_file, 'let title = NSLocalizedString("settings.title", comment: "")')
+
+        searcher = described_class.new(
+          source_paths: [dir],
+          ignore_patterns: ['**/build/**']
+        )
+
+        matches = searcher.search('settings.title')
+
+        expect(matches.map(&:file)).to eq([swift_file])
+      end
+    end
   end
 
   describe 'ignore patterns' do
