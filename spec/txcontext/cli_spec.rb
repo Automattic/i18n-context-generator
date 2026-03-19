@@ -85,7 +85,7 @@ RSpec.describe Txcontext::CLI do
         File.write(config_path, "llm:\n  provider: openai\n")
 
         config = Txcontext::Config.new(translations: [], provider: 'openai')
-        extractor = instance_double(Txcontext::ContextExtractor, run: nil)
+        extractor = instance_double(Txcontext::ContextExtractor, run: nil, errors: [])
 
         allow(cli).to receive(:options).and_return(
           config: config_path,
@@ -103,6 +103,35 @@ RSpec.describe Txcontext::CLI do
           end
         end
       end
+    end
+
+    it 'exits non-zero when extraction completes with errors' do
+      config = Txcontext::Config.new(translations: ['Localizable.strings'], dry_run: false)
+      errored_result = Txcontext::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'API request failed',
+        error: 'timeout'
+      )
+      extractor = instance_double(Txcontext::ContextExtractor, run: nil, errors: [errored_result])
+
+      allow(cli).to receive(:options).and_return(
+        config: nil,
+        translations: 'Localizable.strings',
+        provider: 'anthropic',
+        dry_run: false,
+        diff_base: nil
+      )
+      allow(cli).to receive(:say_error)
+      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+      allow(Txcontext::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(Txcontext::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      with_env('ANTHROPIC_API_KEY', 'test-anthropic-key') do
+        expect { cli.extract }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      end
+
+      expect(cli).to have_received(:say_error).with('Completed with 1 extraction error(s).')
     end
   end
 

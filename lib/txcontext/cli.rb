@@ -64,6 +64,7 @@ module Txcontext
       validate_diff_base!(base_ref: config.diff_base) if config.diff_base
       extractor = ContextExtractor.new(config)
       extractor.run
+      fail_if_extraction_errors!(extractor)
     rescue Txcontext::Error => e
       say_error "Error: #{e.message}"
       exit 1
@@ -138,6 +139,13 @@ module Txcontext
 
     def say_error(message)
       warn message
+    end
+
+    def fail_if_extraction_errors!(extractor)
+      return unless extractor.errors.any?
+
+      say_error "Completed with #{extractor.errors.size} extraction error(s)."
+      exit 1
     end
 
     def sample_config
