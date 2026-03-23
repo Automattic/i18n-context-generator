@@ -1,13 +1,23 @@
 # frozen_string_literal: true
 
 require 'find'
+require_relative 'searcher/source_discovery'
 
 module I18nContextGenerator
   # Finds where translation keys are used in iOS and Android source code.
   class Searcher
+    include SourceDiscovery
+
     # Represents a code match with surrounding context
     Match = Data.define(:file, :line, :match_line, :context, :enclosing_scope) do
       def initialize(file:, line:, match_line: '', context: '', enclosing_scope: nil)
+        super
+      end
+    end
+
+    # Represents a localization entry discovered directly from source code.
+    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment) do
+      def initialize(key:, file:, line:, text: nil, comment: nil)
         super
       end
     end
@@ -367,6 +377,8 @@ module I18nContextGenerator
         "String\\s*\\(\\s*localized:\\s*[\"']#{escaped}[\"']",
         # LocalizedStringKey("key") - SwiftUI
         "LocalizedStringKey\\s*\\(\\s*[\"']#{escaped}[\"']",
+        # Direct assignment to a LocalizedStringKey-typed value
+        "LocalizedStringKey\\s*=\\s*[\"']#{escaped}[\"']",
         # Text("key") - SwiftUI (when using localized strings)
         "Text\\s*\\(\\s*[\"']#{escaped}[\"']",
         # .localized extension pattern

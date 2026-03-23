@@ -185,26 +185,202 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       allow(I18nContextGenerator::PlatformValidator).to receive(:new).and_return(validator)
     end
 
-    it 'prints a message and exits when no translation entries are found' do
+    it 'prints a message and exits when no source entries are found in source-first auto mode' do
       extractor = described_class.new(I18nContextGenerator::Config.new(translations: []))
 
-      allow(extractor).to receive(:load_translations).and_return([])
+      allow(extractor).to receive(:load_source_entries).and_return([])
 
-      expect { extractor.run }.to output("No translation entries found.\n").to_stdout
+      expect { extractor.run }.to output("No source localization entries found.\n").to_stdout
     end
 
     it 'prints a dry-run preview and skips processing' do
       extractor = described_class.new(I18nContextGenerator::Config.new(translations: [], dry_run: true))
       entries = (1..21).map { |i| build_entry("key_#{i}", 'x' * 60) }
 
-      allow(extractor).to receive(:load_translations).and_return(entries)
+      allow(extractor).to receive(:load_source_entries).and_return(entries)
       allow(extractor).to receive(:process_entries)
 
       expect { extractor.run }
-        .to output(/Loaded 21 translation keys.*Dry run - would process these keys:.*\.\.\. and 1 more/m)
+        .to output(/Loaded 21 source localization entries.*Dry run - would process these keys:.*\.\.\. and 1 more/m)
         .to_stdout
 
       expect(extractor).not_to have_received(:process_entries)
+    end
+
+    it 'prints a diff-specific message when source-mode diff filtering finds no entries' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source',
+        diff_base: 'origin/main'
+      )
+      extractor = described_class.new(config)
+      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/View.swift' => Set[10] })
+
+      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(extractor).to receive(:searcher).and_return(
+        instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
+      )
+
+      expect { extractor.run }.to output("No changed source localization entries found since origin/main.\n").to_stdout
+    end
+  end
+
+  describe '#load_source_entries' do
+    it 'hydrates source-discovered entries from translations when available' do
+      config = I18nContextGenerator::Config.new(
+        translations: ['Localizable.strings'],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entries = [
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'SettingsViewController.swift',
+          line: 12,
+          text: nil,
+          comment: 'Navigation title in code'
+        )
+      ]
+      translation_entries = [
+        build_entry('settings.title', 'Settings', metadata: { comment: 'Shown in settings screen' })
+      ]
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: discovered_entries)
+
+      allow(extractor).to receive_messages(
+        searcher: searcher,
+        load_translations: translation_entries
+      )
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries).to contain_exactly(
+        have_attributes(
+          key: 'settings.title',
+          text: 'Settings',
+          source_file: 'test.strings',
+          metadata: {
+            comment: 'Shown in settings screen',
+            source_location: 'SettingsViewController.swift:12'
+          }
+        )
+      )
+    end
+
+    it 'falls back to source text and comments when no translation entry exists' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entries = [
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'Save changes',
+          file: 'EditorViewController.swift',
+          line: 18,
+          text: 'Save changes',
+          comment: 'Button title in the editor'
+        )
+      ]
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: discovered_entries)
+
+      allow(extractor).to receive(:searcher).and_return(searcher)
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries).to contain_exactly(
+        have_attributes(
+          key: 'Save changes',
+          text: 'Save changes',
+          source_file: nil,
+          metadata: {
+            comment: 'Button title in the editor',
+            source_location: 'EditorViewController.swift:18'
+          }
+        )
+      )
+    end
+
+    it 'filters source-discovered entries by the configured source line filter' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        source_line_filter: { 'Sources/SettingsView.swift' => [12] },
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entries = [
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'Sources/SettingsView.swift',
+          line: 12,
+          text: 'Settings',
+          comment: 'Visible title'
+        ),
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'settings.subtitle',
+          file: 'Sources/SettingsView.swift',
+          line: 18,
+          text: 'Manage store',
+          comment: 'Visible subtitle'
+        )
+      ]
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: discovered_entries)
+
+      allow(extractor).to receive(:searcher).and_return(searcher)
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries).to contain_exactly(
+        have_attributes(
+          key: 'settings.title',
+          text: 'Settings',
+          metadata: { comment: 'Visible title', source_location: 'Sources/SettingsView.swift:12' }
+        )
+      )
+    end
+
+    it 'filters source-discovered entries by git diff line numbers in source mode' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source',
+        diff_base: 'origin/main'
+      )
+      extractor = described_class.new(config)
+      discovered_entries = [
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'Sources/SettingsView.swift',
+          line: 12,
+          text: 'Settings',
+          comment: 'Visible title'
+        ),
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'settings.subtitle',
+          file: 'Sources/SettingsView.swift',
+          line: 18,
+          text: 'Manage store',
+          comment: 'Visible subtitle'
+        )
+      ]
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: discovered_entries)
+      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/SettingsView.swift' => Set[18] })
+
+      allow(extractor).to receive(:searcher).and_return(searcher)
+      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries).to contain_exactly(
+        have_attributes(
+          key: 'settings.subtitle',
+          text: 'Manage store',
+          metadata: { comment: 'Visible subtitle', source_location: 'Sources/SettingsView.swift:18' }
+        )
+      )
     end
   end
 
@@ -307,6 +483,30 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(
         ['/tmp/SettingsViewController.swift:10', '/tmp/SettingsHeaderView.swift:18']
       )
+    end
+
+    it 'prefers the discovered source location over usage matches when present' do
+      source_entry = build_entry(
+        'settings.title',
+        'Settings',
+        metadata: {
+          comment: 'Shown in the settings navigation bar',
+          source_location: '/tmp/SettingsView.swift:14'
+        }
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache = instance_double(I18nContextGenerator::Cache, get: nil, set: nil)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+
+      allow(llm).to receive(:generate_context).and_return(
+        I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+      )
+
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      result = extractor.send(:process_entry, source_entry)
+
+      expect(result.locations).to eq(['/tmp/SettingsView.swift:14'])
     end
 
     it 'omits translation comments when the config disables them' do

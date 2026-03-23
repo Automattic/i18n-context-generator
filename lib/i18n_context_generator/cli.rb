@@ -36,6 +36,8 @@ module I18nContextGenerator
     option :provider, aliases: '-p', enum: %w[anthropic openai], desc: 'LLM provider (default: anthropic)'
     option :model, aliases: '-m', desc: 'LLM model to use'
     option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
+    option :discovery_mode, type: :string, enum: %w[auto translations source],
+                            desc: 'How to discover entries: auto, translations, or source (default: auto)'
     option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
     option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
     option :cache, type: :boolean, desc: 'Enable caching of LLM results'
@@ -101,8 +103,9 @@ module I18nContextGenerator
       return if options[:config] && File.exist?(options[:config])
 
       return if options[:translations]
+      return if options[:discovery_mode] == 'source' && options[:source]
 
-      say_error 'Error: --translations (-t) is required unless using a config file'
+      say_error 'Error: --translations (-t) is required unless using a config file or --discovery-mode source with --source'
       exit 1
     end
 
@@ -182,6 +185,8 @@ module I18nContextGenerator
 
         # Processing options
         processing:
+          # Discovery mode: auto, translations, or source
+          discovery_mode: auto
           concurrency: 5
           context_lines: 15
           max_matches_per_key: 3

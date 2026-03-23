@@ -1,10 +1,15 @@
 # frozen_string_literal: true
 
+require_relative 'context_extractor/source_filters'
+require_relative 'context_extractor/run_logging'
+
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
   # sends context to the LLM, and writes results via the configured writer.
   class ContextExtractor
     include Writers::Helpers
+    include SourceFilters
+    include RunLogging
 
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
@@ -45,22 +50,17 @@ module I18nContextGenerator
     def run
       PlatformValidator.new(@config).validate!
 
-      entries = load_translations
+      entries = load_entries
       entries = filter_entries(entries) if @config.key_filter
-      entries = filter_by_diff(entries) if @config.diff_base
+      entries = filter_by_diff(entries) if @config.diff_base && translation_backed_discovery?
       entries = filter_by_range(entries) if @config.start_key || @config.end_key
 
       if entries.empty?
-        if @config.diff_base
-          puts "No changed translation keys found since #{@config.diff_base}."
-        else
-          puts 'No translation entries found.'
-        end
+        log_empty_entries_message
         return
       end
 
-      puts "Loaded #{entries.size} translation keys"
-      puts "(filtered to changes since #{@config.diff_base})" if @config.diff_base
+      log_loaded_entries(entries.size)
 
       if @config.dry_run
         puts "\nDry run - would process these keys:"
@@ -102,7 +102,9 @@ module I18nContextGenerator
     end
 
     def load_translations
-      @config.translations.uniq.flat_map do |path|
+      return @load_translations if defined?(@load_translations)
+
+      @load_translations = @config.translations.uniq.flat_map do |path|
         unless File.exist?(path)
           warn "Translation file not found: #{path}"
           next []
@@ -111,6 +113,67 @@ module I18nContextGenerator
         parser = Parsers::Base.for(path)
         parser.parse(path)
       end
+    end
+
+    def load_entries
+      case normalized_discovery_mode
+      when 'source'
+        load_source_entries
+      when 'translations'
+        load_translations
+      else
+        auto_discovery_entries
+      end
+    end
+
+    def auto_discovery_entries
+      return load_source_entries if @config.translations.empty?
+
+      load_translations
+    end
+
+    def load_source_entries
+      translation_lookup = load_translation_lookup
+      discovered_entries = filter_source_entries(searcher.discover_localization_entries)
+
+      discovered_entries.map do |entry|
+        hydrated_entry = translation_lookup[entry.key]
+        translation_comment = hydrated_entry&.metadata&.dig(:comment)
+        source_comment = entry.comment
+        metadata = {}
+        metadata[:comment] = translation_comment || source_comment if translation_comment || source_comment
+        metadata[:source_location] = "#{entry.file}:#{entry.line}"
+
+        Parsers::TranslationEntry.new(
+          key: entry.key,
+          text: hydrated_entry&.text || entry.text || entry.key,
+          source_file: hydrated_entry&.source_file,
+          metadata: metadata
+        )
+      end
+    end
+
+    def load_translation_lookup
+      return @load_translation_lookup if defined?(@load_translation_lookup)
+
+      @load_translation_lookup = load_translations.each_with_object({}) do |entry, lookup|
+        lookup[entry.key] ||= entry
+      end
+    end
+
+    def normalized_discovery_mode
+      @config.discovery_mode.to_s.downcase
+    end
+
+    def translation_backed_discovery?
+      return true if normalized_discovery_mode == 'translations'
+      return false if normalized_discovery_mode == 'source'
+
+      @config.translations.any?
+    end
+
+    def entry_label_for_logging
+      translation_backed_discovery? ? 'translation keys' : 'source localization entries'
     end
 
     def filter_entries(entries)
@@ -277,7 +340,7 @@ module I18nContextGenerator
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
-        locations: matches.map { |m| "#{m.file}:#{m.line}" },
+        locations: result_locations_for(entry, matches),
         error: llm_result.error
       )
 

@@ -3,42 +3,44 @@
 module I18nContextGenerator
   # Holds all configuration for an extraction run, loaded from YAML config files and/or CLI options.
   class Config
-    attr_reader :translations, :source_paths, :ignore_patterns,
+    attr_reader :translations, :source_paths, :source_line_filter, :ignore_patterns,
                 :provider, :model, :concurrency, :context_lines,
                 :max_matches_per_key, :output_path, :output_format,
                 :no_cache, :dry_run, :key_filter, :write_back,
                 :swift_functions, :write_back_to_code, :diff_base, :context_prefix,
                 :context_mode, :start_key, :end_key, :include_file_paths,
-                :include_translation_comments, :redact_prompts
+                :include_translation_comments, :redact_prompts, :discovery_mode
 
     DEFAULT_CONTEXT_PREFIX = 'Context: '
     DEFAULT_CONTEXT_MODE = 'replace' # "replace" or "append"
 
     def initialize(**attrs)
-      @translations = attrs[:translations] || []
-      @source_paths = attrs[:source_paths] || ['.']
-      @ignore_patterns = attrs[:ignore_patterns] || []
-      @provider = attrs[:provider] || 'anthropic'
-      @model = attrs[:model]
-      @concurrency = attrs[:concurrency] || 5
-      @context_lines = attrs[:context_lines] || 15
-      @max_matches_per_key = attrs[:max_matches_per_key] || 3
-      @output_path = attrs.key?(:output_path) ? attrs[:output_path] : nil
-      @output_format = attrs[:output_format] || 'csv'
-      @no_cache = attrs.key?(:no_cache) ? attrs[:no_cache] : true
-      @dry_run = attrs[:dry_run] || false
-      @key_filter = attrs[:key_filter]
-      @write_back = attrs[:write_back] || false
-      @write_back_to_code = attrs[:write_back_to_code] || false
-      @swift_functions = attrs[:swift_functions] || default_swift_functions
-      @diff_base = attrs[:diff_base]
-      @context_prefix = attrs.key?(:context_prefix) ? attrs[:context_prefix] : DEFAULT_CONTEXT_PREFIX
-      @context_mode = attrs[:context_mode] || DEFAULT_CONTEXT_MODE
-      @start_key = attrs[:start_key]
-      @end_key = attrs[:end_key]
-      @include_file_paths = attrs.key?(:include_file_paths) ? attrs[:include_file_paths] : false
-      @include_translation_comments = attrs.key?(:include_translation_comments) ? attrs[:include_translation_comments] : true
-      @redact_prompts = attrs.key?(:redact_prompts) ? attrs[:redact_prompts] : true
+      @translations = fetch_defaulting_value(attrs, :translations, [])
+      @source_paths = fetch_defaulting_value(attrs, :source_paths, ['.'])
+      @source_line_filter = fetch_config_value(attrs, :source_line_filter, nil)
+      @ignore_patterns = fetch_defaulting_value(attrs, :ignore_patterns, [])
+      @provider = fetch_defaulting_value(attrs, :provider, 'anthropic')
+      @model = fetch_config_value(attrs, :model, nil)
+      @concurrency = fetch_defaulting_value(attrs, :concurrency, 5)
+      @context_lines = fetch_defaulting_value(attrs, :context_lines, 15)
+      @max_matches_per_key = fetch_defaulting_value(attrs, :max_matches_per_key, 3)
+      @output_path = fetch_config_value(attrs, :output_path, nil)
+      @output_format = fetch_defaulting_value(attrs, :output_format, 'csv')
+      @no_cache = fetch_boolean_value(attrs, :no_cache, true)
+      @dry_run = fetch_boolean_value(attrs, :dry_run, false)
+      @key_filter = fetch_config_value(attrs, :key_filter, nil)
+      @write_back = fetch_boolean_value(attrs, :write_back, false)
+      @write_back_to_code = fetch_boolean_value(attrs, :write_back_to_code, false)
+      @swift_functions = fetch_defaulting_value(attrs, :swift_functions, default_swift_functions)
+      @diff_base = fetch_config_value(attrs, :diff_base, nil)
+      @context_prefix = fetch_defaulting_value(attrs, :context_prefix, DEFAULT_CONTEXT_PREFIX)
+      @context_mode = fetch_defaulting_value(attrs, :context_mode, DEFAULT_CONTEXT_MODE)
+      @start_key = fetch_config_value(attrs, :start_key, nil)
+      @end_key = fetch_config_value(attrs, :end_key, nil)
+      @include_file_paths = fetch_boolean_value(attrs, :include_file_paths, false)
+      @include_translation_comments = fetch_boolean_value(attrs, :include_translation_comments, true)
+      @redact_prompts = fetch_boolean_value(attrs, :redact_prompts, true)
+      @discovery_mode = fetch_defaulting_value(attrs, :discovery_mode, 'auto')
     end
 
     def default_swift_functions
@@ -65,6 +67,7 @@ module I18nContextGenerator
         concurrency: yaml.dig('processing', 'concurrency') || 5,
         context_lines: yaml.dig('processing', 'context_lines') || 15,
         max_matches_per_key: yaml.dig('processing', 'max_matches_per_key') || 3,
+        discovery_mode: yaml.dig('processing', 'discovery_mode') || 'auto',
         output_path: yaml.dig('output', 'path'),
         output_format: yaml.dig('output', 'format') || 'csv',
         write_back: yaml.dig('output', 'write_back') || false,
@@ -105,6 +108,7 @@ module I18nContextGenerator
         concurrency: options[:concurrency] || 5,
         context_lines: 15,
         max_matches_per_key: 3,
+        discovery_mode: options[:discovery_mode] || 'auto',
         output_path: options[:output],
         output_format: options[:format] || 'csv',
         no_cache: options[:cache].nil? || !options[:cache],
@@ -170,6 +174,20 @@ module I18nContextGenerator
 
     private
 
+    def fetch_config_value(attrs, key, default)
+      attrs.key?(key) ? attrs[key] : default
+    end
+
+    def fetch_defaulting_value(attrs, key, default)
+      attrs.key?(key) ? (attrs[key] || default) : default
+    end
+
+    def fetch_boolean_value(attrs, key, default)
+      return default unless attrs.key?(key)
+
+      attrs[key].nil? ? default : attrs[key]
+    end
+
     def merge_cli_scalar_options(options)
       scalar_mappings = {
         key_filter: :keys,
@@ -178,6 +196,7 @@ module I18nContextGenerator
         provider: :provider,
         model: :model,
         concurrency: :concurrency,
+        discovery_mode: :discovery_mode,
         diff_base: :diff_base,
         context_prefix: :context_prefix,
         context_mode: :context_mode,

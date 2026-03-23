@@ -96,14 +96,11 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches).not_to be_empty
         end
 
-        # Known limitation: direct string assignment to LocalizedStringKey type
-        # Pattern: @State var key: LocalizedStringKey = "key"
-        # This is not wrapped in LocalizedStringKey() so won't match
-        it 'does not currently find direct string assignment to LocalizedStringKey type' do
+        it 'finds direct string assignment to LocalizedStringKey type' do
           matches = searcher.search('swiftui.state.button')
 
-          # This is a known gap - the pattern needs a LocalizedStringKey() wrapper
-          expect(matches).to be_empty
+          expect(matches).not_to be_empty
+          expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
       end
 
@@ -201,6 +198,77 @@ RSpec.describe I18nContextGenerator::Searcher do
         expect(strings_file_matches).to be_empty
       end
     end
+
+    describe '#discover_localization_entries' do
+      it 'discovers localized keys and comments directly from source files' do
+        entries = searcher.discover_localization_entries
+
+        settings_title = entries.find { |entry| entry.key == 'settings.title' }
+        multiline_label = entries.find { |entry| entry.key == 'multiline.accessibility.label' }
+        state_button = entries.find { |entry| entry.key == 'swiftui.state.button' }
+
+        expect(settings_title).to have_attributes(
+          comment: 'Navigation bar title for settings screen'
+        )
+        expect(multiline_label).to have_attributes(
+          comment: 'Accessibility label for main content area'
+        )
+        expect(state_button).to have_attributes(
+          text: nil,
+          comment: nil
+        )
+      end
+
+      it 'keeps the first entry unless a later duplicate adds a comment' do
+        uncommented_first = described_class::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'First.swift',
+          line: 10,
+          text: 'Settings',
+          comment: nil
+        )
+        uncommented_second = described_class::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'Second.swift',
+          line: 20,
+          text: 'Settings',
+          comment: nil
+        )
+        commented_third = described_class::DiscoveredLocalization.new(
+          key: 'settings.title',
+          file: 'Third.swift',
+          line: 30,
+          text: 'Settings',
+          comment: 'Navigation title for settings screen'
+        )
+
+        deduplicated = searcher.send(
+          :deduplicate_discovered_entries,
+          [uncommented_first, uncommented_second, commented_third]
+        )
+
+        expect(deduplicated).to contain_exactly(
+          have_attributes(
+            file: 'Third.swift',
+            line: 30,
+            comment: 'Navigation title for settings screen'
+          )
+        )
+
+        deduplicated = searcher.send(
+          :deduplicate_discovered_entries,
+          [uncommented_first, uncommented_second]
+        )
+
+        expect(deduplicated).to contain_exactly(
+          have_attributes(
+            file: 'First.swift',
+            line: 10,
+            comment: nil
+          )
+        )
+      end
+    end
   end
 
   describe 'Android platform' do
@@ -290,6 +358,18 @@ RSpec.describe I18nContextGenerator::Searcher do
 
         strings_xml_matches = matches.select { |m| m.file.include?('values/strings.xml') }
         expect(strings_xml_matches).to be_empty
+      end
+    end
+
+    describe '#discover_localization_entries' do
+      it 'discovers Android string references from source files' do
+        entries = searcher.discover_localization_entries
+
+        settings_title = entries.find { |entry| entry.key == 'settings_title' }
+        xml_title = entries.find { |entry| entry.key == 'xml_toolbar_title' }
+
+        expect(settings_title).not_to be_nil
+        expect(xml_title).not_to be_nil
       end
     end
   end

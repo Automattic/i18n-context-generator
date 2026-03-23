@@ -44,6 +44,17 @@ RSpec.describe I18nContextGenerator::CLI do
       end
     end
 
+    it 'accepts source-only discovery when source paths are provided' do
+      allow(cli).to receive(:options).and_return(
+        config: nil,
+        translations: nil,
+        discovery_mode: 'source',
+        source: './Sources'
+      )
+
+      expect { cli.send(:validate_options!) }.not_to raise_error
+    end
+
     it 'requires translations when no config file is provided' do
       allow(cli).to receive(:options).and_return(config: nil, translations: nil)
 
@@ -132,6 +143,33 @@ RSpec.describe I18nContextGenerator::CLI do
       end
 
       expect(cli).to have_received(:say_error).with('Completed with 1 extraction error(s).')
+    end
+
+    it 'validates diff-base in source mode' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['./Sources'],
+        discovery_mode: 'source',
+        diff_base: 'origin/main',
+        dry_run: true
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+
+      allow(cli).to receive(:options).and_return(
+        config: nil,
+        translations: nil,
+        discovery_mode: 'source',
+        source: './Sources',
+        provider: 'anthropic',
+        dry_run: true,
+        diff_base: 'origin/main'
+      )
+      allow(cli).to receive(:validate_diff_base!)
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      expect { cli.extract }.not_to raise_error
+      expect(cli).to have_received(:validate_diff_base!).with(base_ref: 'origin/main')
     end
   end
 

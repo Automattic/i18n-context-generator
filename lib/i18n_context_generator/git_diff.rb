@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'open3'
+require 'pathname'
 
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
@@ -18,7 +19,7 @@ module I18nContextGenerator
       translation_paths.each do |path|
         next unless File.exist?(path)
 
-        diff_output = git_diff_for_file(path)
+        diff_output = git_diff_for_path(path)
         next if diff_output.empty?
 
         keys.merge(extract_keys_from_diff(diff_output, path))
@@ -27,9 +28,23 @@ module I18nContextGenerator
       keys
     end
 
+    # Get changed line numbers in source files since the base ref.
+    # @param source_paths [Array<String>] paths to source files or directories
+    # @return [Hash{String => Set<Integer>}] changed line numbers keyed by file path
+    def changed_lines(source_paths)
+      source_paths.each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |path, line_map|
+        next unless File.exist?(path)
+
+        diff_output = git_diff_for_path(path)
+        next if diff_output.empty?
+
+        merge_line_maps!(line_map, extract_changed_lines(diff_output, path))
+      end
+    end
+
     # Check if we're in a git repository
     def self.available?
-      system('git rev-parse --git-dir > /dev/null 2>&1')
+      system('git', 'rev-parse', '--git-dir', out: File::NULL, err: File::NULL)
     end
 
     # Check if the base ref exists
@@ -39,13 +54,61 @@ module I18nContextGenerator
 
     private
 
-    def git_diff_for_file(path)
+    def git_diff_for_path(path)
       # Run git from the directory containing the file so the correct repo is used
       dir = File.directory?(path) ? path : File.dirname(path)
       pathspec = File.directory?(path) ? '.' : File.basename(path)
       # Use triple-dot to get changes on current branch since it diverged from base
       stdout, _stderr, status = Open3.capture3('git', 'diff', "#{@base_ref}...HEAD", '--', pathspec, chdir: dir)
       status.success? ? stdout : ''
+    end
+
+    def extract_changed_lines(diff_output, path)
+      changed_lines = Hash.new { |h, k| h[k] = Set.new }
+      current_file = File.file?(path) ? path : nil
+      file_line = nil
+
+      diff_output.each_line do |line|
+        if (match = line.match(%r{^\+\+\+ b/(.+)$}))
+          current_file = resolve_diff_file_path(path, match[1])
+          next
+        end
+
+        if (hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          file_line = hunk[1].to_i
+          next
+        end
+
+        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
+        next if file_line.nil? || current_file.nil?
+
+        if line.start_with?('+')
+          changed_lines[current_file] << file_line
+          file_line += 1
+        elsif line.start_with?('-')
+          next
+        else
+          file_line += 1
+        end
+      end
+
+      changed_lines
+    end
+
+    def resolve_diff_file_path(path, diff_file_path)
+      return Pathname.new(path).cleanpath.to_s if File.file?(path)
+
+      normalized_path = path.to_s.sub(%r{/\z}, '')
+      return Pathname.new(diff_file_path).cleanpath.to_s if normalized_path.empty? || normalized_path == '.'
+      return Pathname.new(diff_file_path).cleanpath.to_s if diff_file_path == normalized_path || diff_file_path.start_with?("#{normalized_path}/")
+
+      Pathname.new(File.join(normalized_path, diff_file_path)).cleanpath.to_s
+    end
+
+    def merge_line_maps!(target, source)
+      source.each do |file, lines|
+        target[file].merge(lines)
+      end
     end
 
     def extract_keys_from_diff(diff_output, path)

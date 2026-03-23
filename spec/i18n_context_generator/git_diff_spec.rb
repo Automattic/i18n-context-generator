@@ -1,6 +1,47 @@
 # frozen_string_literal: true
 
 RSpec.describe I18nContextGenerator::GitDiff do
+  describe '#changed_lines' do
+    it 'detects changed source line numbers for files in nested directories' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          system('git', 'init', '-q', '-b', 'main')
+          FileUtils.mkdir_p('ios/App')
+          path = File.join('ios', 'App', 'SettingsView.swift')
+
+          File.write(path, <<~SWIFT)
+            struct SettingsView {
+              var body: some View {
+                Text("existing")
+              }
+            }
+          SWIFT
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator', '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Initial commit')
+          system('git', 'checkout', '-q', '-b', 'feature')
+
+          File.write(path, <<~SWIFT)
+            struct SettingsView {
+              var body: some View {
+                Text("existing")
+                Text("new.settings.title")
+              }
+            }
+          SWIFT
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator', '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Add localized string')
+
+          diff = described_class.new(base_ref: 'main')
+          changed_lines = diff.changed_lines(['ios/App'])
+
+          expect(changed_lines.fetch(path)).to include(4)
+        end
+      end
+    end
+  end
+
   describe '#changed_keys' do
     it 'detects changes for translation files in nested directories' do
       Dir.mktmpdir do |dir|

@@ -22,6 +22,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.include_file_paths).to be false
       expect(config.include_translation_comments).to be true
       expect(config.redact_prompts).to be true
+      expect(config.discovery_mode).to eq('auto')
       expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
     end
 
@@ -50,6 +51,56 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(config.output_path).to be_nil
     end
+
+    it 'treats explicit nil as missing for defaulted non-boolean values' do
+      config = described_class.new(
+        translations: nil,
+        source_paths: nil,
+        ignore_patterns: nil,
+        provider: nil,
+        concurrency: nil,
+        context_lines: nil,
+        max_matches_per_key: nil,
+        output_format: nil,
+        swift_functions: nil,
+        context_prefix: nil,
+        context_mode: nil,
+        discovery_mode: nil
+      )
+
+      expect(config.translations).to eq([])
+      expect(config.source_paths).to eq(['.'])
+      expect(config.ignore_patterns).to eq([])
+      expect(config.provider).to eq('anthropic')
+      expect(config.concurrency).to eq(5)
+      expect(config.context_lines).to eq(15)
+      expect(config.max_matches_per_key).to eq(3)
+      expect(config.output_format).to eq('csv')
+      expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
+      expect(config.context_prefix).to eq('Context: ')
+      expect(config.context_mode).to eq('replace')
+      expect(config.discovery_mode).to eq('auto')
+    end
+
+    it 'preserves explicit false for booleans while defaulting nil booleans' do
+      config = described_class.new(
+        no_cache: false,
+        dry_run: false,
+        write_back: false,
+        write_back_to_code: false,
+        include_file_paths: false,
+        include_translation_comments: nil,
+        redact_prompts: nil
+      )
+
+      expect(config.no_cache).to be false
+      expect(config.dry_run).to be false
+      expect(config.write_back).to be false
+      expect(config.write_back_to_code).to be false
+      expect(config.include_file_paths).to be false
+      expect(config.include_translation_comments).to be true
+      expect(config.redact_prompts).to be true
+    end
   end
 
   describe '.from_file' do
@@ -72,6 +123,7 @@ RSpec.describe I18nContextGenerator::Config do
           model: claude-3-haiku
 
         processing:
+          discovery_mode: source
           concurrency: 8
           context_lines: 15
           max_matches_per_key: 5
@@ -111,6 +163,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.ignore_patterns).to eq(['**/Generated/**', '**/*.test.swift'])
       expect(config.provider).to eq('anthropic')
       expect(config.model).to eq('claude-3-haiku')
+      expect(config.discovery_mode).to eq('source')
       expect(config.concurrency).to eq(8)
       expect(config.context_lines).to eq(15)
       expect(config.max_matches_per_key).to eq(5)
@@ -144,6 +197,7 @@ RSpec.describe I18nContextGenerator::Config do
         source: './Sources,./App',
         provider: 'anthropic',
         model: 'claude-3-opus',
+        discovery_mode: 'source',
         concurrency: 3,
         output: 'output.csv',
         format: 'json',
@@ -165,6 +219,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.source_paths).to eq(['./Sources', './App'])
       expect(config.provider).to eq('anthropic')
       expect(config.model).to eq('claude-3-opus')
+      expect(config.discovery_mode).to eq('source')
       expect(config.concurrency).to eq(3)
       expect(config.output_path).to eq('output.csv')
       expect(config.output_format).to eq('json')
