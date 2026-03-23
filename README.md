@@ -1,176 +1,202 @@
 # i18n-context-generator
 
-A CLI tool that extracts contextual information from mobile app source code to improve translation quality. Uses AI to analyze how localized strings are used in your iOS and Android codebase and generates descriptions to help translators produce better translations.
+`i18n-context-generator` generates translator-facing context for your existing localization keys. It reads translation files, finds where each key is used in app code, and asks an LLM to explain the string's UI role in plain language.
 
-## Features
+You can export the results as CSV or JSON, write them back into `.strings` or `strings.xml`, or update Swift `comment:` arguments directly.
 
-- **iOS Support**: Parses `.strings` files and searches Swift/Objective-C code
-- **Android Support**: Parses `strings.xml` files and searches Kotlin/Java code
-- **AI-Powered Context**: Uses Anthropic or OpenAI models to understand UI context
-- **Write-Back**: Optionally writes context comments back to source files
-- **Optional Caching**: Opt-in caching to avoid re-processing unchanged translations
-- **Prompt Privacy Controls**: Redacts likely secrets, URLs, and emails before sending prompts by default
+It is designed for mobile codebases. Each run must target either iOS or Android, not both.
+
+## What It Does
+
+- Parses `.strings`, `strings.xml`, `.json`, and `.yml` or `.yaml` translation files
+- Searches Swift, Objective-C, Kotlin, Java, and Android XML for matching usages
+- Uses Anthropic or OpenAI models to infer UI context
+- Supports diff-based runs, key filters, and key ranges for incremental work
+- Redacts likely secrets, URLs, and emails from prompts by default
+- Optionally caches results to avoid repeating identical LLM work
+
+## Requirements
+
+- Ruby 3.2+
+- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for real runs
+- No API key is required for `--dry-run`
 
 ## Installation
 
 ```bash
-cd i18n-context-generator
 bundle install
 chmod +x exe/i18n-context-generator
 ```
 
-### Requirements
-
-- Ruby 3.1+
-- An API key for your selected LLM provider (`ANTHROPIC_API_KEY` or `OPENAI_API_KEY`)
-
 ## Quick Start
 
+Preview what would be processed:
+
 ```bash
-# Set your API key
-export ANTHROPIC_API_KEY=your-api-key
-
-# Or use OpenAI
-# export OPENAI_API_KEY=your-api-key
-
-# iOS app
 bundle exec exe/i18n-context-generator extract \
   -t ios/MyApp/Resources/Localizable.strings \
-  -s ios/MyApp/
+  -s ios/MyApp \
+  --dry-run
+```
 
-# Android app
+For a real run, set a provider API key:
+
+```bash
+export ANTHROPIC_API_KEY=your-api-key
+# or
+export OPENAI_API_KEY=your-api-key
+```
+
+Generate context and save it to CSV:
+
+```bash
+bundle exec exe/i18n-context-generator extract \
+  -t ios/MyApp/Resources/Localizable.strings \
+  -s ios/MyApp \
+  -o translation-context.csv
+```
+
+Do the same for Android:
+
+```bash
 bundle exec exe/i18n-context-generator extract \
   -t android/app/src/main/res/values/strings.xml \
-  -s android/app/src/main/java/
+  -s android/app/src/main \
+  -o translation-context.csv
+```
 
-# Dry run (preview without calling API)
-bundle exec exe/i18n-context-generator extract \
-  -t Localizable.strings \
-  -s . \
-  --dry-run
+Write generated context back into translation files:
 
-# Write context back to source files
+```bash
 bundle exec exe/i18n-context-generator extract \
-  -t Localizable.strings \
-  -s . \
+  -t ios/MyApp/Resources/Localizable.strings \
+  -s ios/MyApp \
   --write-back
 ```
 
-Runs must target a single platform at a time. If a repository contains both iOS and Android code, run `i18n-context-generator` separately for each platform.
-
-## Usage
-
-### CLI Options
-
-```
--c, --config CONFIG        Path to config file (.i18n-context-generator.yml)
--t, --translations FILES   Translation file(s), comma-separated
--s, --source DIRS          Source directory(ies) to search, comma-separated
--o, --output PATH          Output file path (CSV only written if specified)
--f, --format FORMAT        Output format: csv or json (default: csv)
--p, --provider PROVIDER    LLM provider: anthropic or openai (default: anthropic)
--m, --model MODEL          LLM model to use
--k, --keys PATTERNS        Filter keys (comma-separated patterns, supports * wildcard)
-    --concurrency N        Number of concurrent requests (default: 5)
-    --dry-run              Show what would be processed without calling LLM
-    --cache                Enable caching (disabled by default)
-    --write-back           Write context back to source translation files (.strings, strings.xml)
-    --write-back-to-code   Write context back to Swift source code comment: parameters
-    --diff-base REF        Only process keys changed since this git ref (e.g., main, origin/main)
-    --context-prefix TEXT  Prefix for context comments (default: "Context: ", use "" for none)
-    --context-mode MODE    How to handle existing comments: replace or append (default: replace)
-    --include-file-paths   Include full source file paths in LLM prompts (default: false)
-    --include-translation-comments
-                          Include translation file comments in LLM prompts (default: true)
-    --redact-prompts       Redact likely secrets and PII from LLM prompts (default: true)
-```
-
-### Using a Config File
+Write generated context back into Swift `comment:` arguments:
 
 ```bash
-# Create a config file
-bundle exec exe/i18n-context-generator init
+bundle exec exe/i18n-context-generator extract \
+  -t ios/MyApp/Resources/Localizable.strings \
+  -s ios/MyApp \
+  --write-back-to-code
+```
 
-# Run with config
+Use `--output`, `--write-back`, or `--write-back-to-code` depending on where you want results to go. If you have both iOS and Android code in the same repository, run the tool separately for each platform.
+
+## Configuration
+
+Create a starter config:
+
+```bash
+bundle exec exe/i18n-context-generator init
 bundle exec exe/i18n-context-generator extract --config .i18n-context-generator.yml
 ```
 
 Example `.i18n-context-generator.yml`:
 
 ```yaml
-# Translation files to process
 translations:
-  # iOS
   - path: ios/MyApp/Resources/Localizable.strings
 
-# Source code directories to search
 source:
   paths:
-    - ios/MyApp/
+    - ios/MyApp
   ignore:
     - "**/Pods/**"
     - "**/build/**"
     - "**/*Tests*"
 
-# LLM configuration
 llm:
   provider: anthropic
   model: claude-sonnet-4-6
 
-# Processing options
 processing:
   concurrency: 5
-  context_lines: 20
+  context_lines: 15
   max_matches_per_key: 3
 
-# Output configuration
 output:
   format: csv
   path: translation-context.csv
-  write_back: false            # Write to .strings / strings.xml
-  write_back_to_code: false    # Write to Swift comment: parameters
-  context_prefix: "Context: "  # Prefix for comments (use "" for none)
-  context_mode: replace        # "replace" existing comments or "append" to them
+  write_back: false
+  write_back_to_code: false
+  context_prefix: "Context: "
+  context_mode: replace
 
-# Swift-specific configuration
 swift:
   functions:
     - NSLocalizedString
     - "String(localized:"
     - "Text("
 
-# Prompt privacy controls
 privacy:
   include_file_paths: false
   include_translation_comments: true
   redact_prompts: true
 ```
 
-Use a separate config file or invocation for Android projects instead of combining iOS and Android paths in one run.
+Use a separate config for Android instead of mixing iOS and Android paths in the same run.
 
-## Supported Formats
+## CLI Reference
+
+### Inputs and Output
+
+- `-t`, `--translations FILES`: translation files to process, comma-separated
+- `-s`, `--source DIRS`: source files or directories to search, comma-separated
+- `-c`, `--config PATH`: load options from `.i18n-context-generator.yml`
+- `-o`, `--output PATH`: write results to a file
+- `-f`, `--format csv|json`: output format, default `csv`
+
+### LLM Settings
+
+- `-p`, `--provider anthropic|openai`: LLM provider, default `anthropic`
+- `-m`, `--model MODEL`: explicit model override
+- `--concurrency N`: parallel request count, default `5`
+
+### Filtering and Incremental Runs
+
+- `-k`, `--keys PATTERNS`: wildcard key filter such as `settings.*`
+- `--diff-base REF`: process only keys changed since a Git ref
+- `--start-key KEY`: start at a specific key, inclusive
+- `--end-key KEY`: stop at a specific key, inclusive
+- `--dry-run`: preview matching keys without calling the LLM
+
+### Write-Back and Prompt Controls
+
+- `--write-back`: update `.strings` or `strings.xml`
+- `--write-back-to-code`: update Swift `comment:` arguments
+- `--context-prefix TEXT`: prefix generated comments, default `Context: `
+- `--context-mode replace|append`: replace existing comments or append to them
+- `--cache`: enable on-disk caching
+- `--include-file-paths`: include full source paths in prompts
+- `--include-translation-comments`: include existing translation comments in prompts, default `true`
+- `--redact-prompts`: redact likely secrets and PII before prompts are sent, default `true`
+
+Run `bundle exec exe/i18n-context-generator help extract` for the full command reference.
+
+## Supported Inputs
 
 ### Translation Files
 
-| Format | Extension | Platform |
-|--------|-----------|----------|
-| Apple Strings | `.strings` | iOS/macOS |
-| Android XML | `strings.xml` | Android |
-| JSON | `.json` | Cross-platform |
-| YAML | `.yml`, `.yaml` | Cross-platform |
+| Format | Notes |
+|--------|-------|
+| `.strings` | Apple strings files |
+| `strings.xml` | Android string resources, including plurals and arrays |
+| `.json` | Nested keys are flattened |
+| `.yml`, `.yaml` | Nested keys are flattened |
 
-### Source Code
+### Source Search
 
-| Language | Extensions | Patterns Detected |
-|----------|------------|-------------------|
-| Swift | `.swift` | `NSLocalizedString("key", comment:)` |
-| Objective-C | `.m`, `.mm` | `NSLocalizedString(@"key", ...)` |
-| Kotlin | `.kt` | `getString(R.string.key)`, `context.getString(...)` |
-| Java | `.java` | `getString(R.string.key)`, `getResources().getString(...)` |
+| Platform | Files searched | Typical patterns |
+|----------|----------------|------------------|
+| iOS | `.swift`, `.m`, `.mm`, `.h` | `NSLocalizedString`, `String(localized:)`, `LocalizedStringKey`, `Text`, `.localized` |
+| Android | `.kt`, `.java`, `.xml` | `R.string.*`, `getString(...)`, `stringResource(...)`, `@string/...`, plurals, arrays |
 
-## Output Examples
+## Output
 
-### CSV Output
+CSV example:
 
 ```csv
 key,text,description,ui_element,tone,max_length,locations,error
@@ -179,74 +205,66 @@ common.save,Save,Primary action button in forms and edit screens,button,neutral,
 error.network,Unable to connect,Error message shown when network requests fail,alert,apologetic,,ios/ProfileViewController.swift:94,
 ```
 
-### Write-Back Examples
+With `--write-back`, generated context is written back into translation files:
 
-#### Translation Files (`--write-back`)
+**Before**
 
-**Before** (`Localizable.strings`):
-```
+```text
 /* Settings screen title */
 "settings.title" = "Settings";
 ```
 
-**After**:
-```
+**After**
+
+```text
 /* Context: Navigation bar title for the main settings screen */
 "settings.title" = "Settings";
 ```
 
-If you want to preserve existing manual comments and append generated context instead, use `--context-mode append`.
+With `--write-back-to-code`, Swift `comment:` arguments are updated:
 
-#### Swift Source Code (`--write-back-to-code`)
+**Before**
 
-**Before**:
 ```swift
 let title = NSLocalizedString("settings.title", comment: "Settings screen title")
 ```
 
-**After**:
+**After**
+
 ```swift
 let title = NSLocalizedString("settings.title", comment: "Context: Navigation bar title for the main settings screen")
 ```
 
-#### Without Prefix (`--context-prefix ""`)
-
-If you prefer no prefix, use `--context-prefix ""`:
-
-```swift
-// Result with --context-prefix ""
-let title = NSLocalizedString("settings.title", comment: "Navigation bar title for the main settings screen")
-```
+Use `--context-mode append` to preserve existing manual comments, or `--context-prefix ""` to omit the default prefix.
 
 ## How It Works
 
-1. **Parse**: Reads translation keys from `.strings` or `strings.xml` files
-2. **Search**: Scans source code to find where each key is used
-3. **Analyze**: Sends code context to the selected LLM provider to understand UI usage
-4. **Output**: Writes context to CSV/JSON and optionally back to source files
+1. Parse translation keys from the input files.
+2. Find matching usages in the selected source paths.
+3. Send the most relevant matches, plus optional existing comments, to the LLM.
+4. Save the generated context to a file or write it back into source files.
 
 ## CI Integration
 
-Use `--diff-base` to process only changed translation keys in a PR:
+Use `--diff-base` to process only keys changed in a branch or pull request:
 
 ```bash
-# Process only keys changed since main branch
-i18n-context-generator extract \
-  -t Localizable.strings \
-  -s ios/ \
+bundle exec exe/i18n-context-generator extract \
+  -t ios/Resources/Localizable.strings \
+  -s ios \
   --diff-base origin/main \
   --write-back-to-code \
   --context-prefix ""
 ```
 
-Example GitHub Actions workflow:
+Example GitHub Actions step:
 
 ```yaml
 - name: Add translation context
   run: |
-    i18n-context-generator extract \
+    bundle exec exe/i18n-context-generator extract \
       -t ios/Resources/Localizable.strings \
-      -s ios/ \
+      -s ios \
       --diff-base origin/main \
       --write-back-to-code
     git diff --quiet || git commit -am "Add translation context"
@@ -254,26 +272,17 @@ Example GitHub Actions workflow:
 
 ## Caching
 
-Caching is **disabled by default**. When enabled, results are cached in `.i18n-context-generator-cache/` to avoid re-processing unchanged translations.
+Caching is disabled by default. Enable it with `--cache`.
 
-To enable caching:
-- CLI: Use `--cache` flag
-- Ruby API: Pass `no_cache: false` to `Config.new`
+Cached results are stored in `.i18n-context-generator-cache/`. The cache is refreshed when the translation text or the prompt-shaping inputs change.
 
-Cache is invalidated when the translation text changes.
+## Releasing
 
-## Comparison with Crowdin Context Harvester
-
-| Feature | i18n-context-generator | Crowdin Context Harvester |
-|---------|------------------------|---------------------------|
-| Platform focus | Mobile (iOS/Android) | General |
-| Vendor lock-in | None | Crowdin |
-| Write-back to source | Yes | No (uploads to Crowdin) |
-| Language | Ruby | JavaScript |
-| LLM providers | Anthropic (more coming) | OpenAI, Gemini, Azure, Anthropic, Mistral |
+1. Add changelog entries under the appropriate subsection in `## Trunk` in `CHANGELOG.md`.
+2. Run `bundle exec rake new_release`. It suggests a version based on the changelog, creates a `release/<version>` branch, updates `version.rb`, `Gemfile.lock`, and `CHANGELOG.md`, then commits, pushes, and opens a PR into `trunk`.
+3. Merge the release PR on GitHub.
+4. Create a GitHub Release targeting `trunk` with the version as the tag. CI publishes the gem to RubyGems.
 
 ## License
 
-<a href="https://github.com/Automattic/i18n-context-generator/blob/trunk/LICENSE">
-    <img alt="License" src="https://img.shields.io/github/license/Automattic/i18n-context-generator">
-</a>
+Licensed under [MPL-2.0](LICENSE).
