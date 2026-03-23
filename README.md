@@ -15,12 +15,6 @@ It is designed for mobile codebases. Each run must target either iOS or Android,
 - Redacts likely secrets, URLs, and emails from prompts by default
 - Optionally caches results to avoid repeating identical LLM work
 
-## Requirements
-
-- Ruby 3.2+
-- `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` for real runs
-- No API key is required for `--dry-run`
-
 ## Installation
 
 ```bash
