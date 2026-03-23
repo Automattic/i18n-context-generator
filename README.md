@@ -272,6 +272,17 @@ Cache is invalidated when the translation text changes.
 | Language | Ruby | JavaScript |
 | LLM providers | Anthropic (more coming) | OpenAI, Gemini, Azure, Anthropic, Mistral |
 
+## Releasing
+
+1. Add changelog entries under the appropriate subsection in `## Trunk` in `CHANGELOG.md`
+2. Run `bundle exec rake new_release` — this will:
+   - Prompt for the new version number (suggests one based on changelog)
+   - Create a `release/<version>` branch
+   - Update `version.rb`, `Gemfile.lock`, and `CHANGELOG.md`
+   - Commit, push, and open a PR into `trunk`
+3. Merge the PR on GitHub
+4. [Create a GitHub Release](https://github.com/Automattic/i18n-context-generator/releases/new) targeting `trunk` with the version as the tag — CI will publish the gem to RubyGems
+
 ## License
 
 <a href="https://github.com/Automattic/i18n-context-generator/blob/trunk/LICENSE">
