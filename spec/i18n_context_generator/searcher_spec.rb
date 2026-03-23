@@ -58,8 +58,10 @@ RSpec.describe I18nContextGenerator::Searcher do
           matches = searcher.search('wrapper.title')
 
           expect(matches).not_to be_empty
-          expect(matches.any? { |m| m.file.end_with?('LocalizationWrapperView.swift') &&
-            m.match_line.include?('label.text = Localization.title') }).to be true
+          expect(matches.any? do |m|
+            m.file.end_with?('LocalizationWrapperView.swift') &&
+                      m.match_line.include?('label.text = Localization.title')
+          end).to be true
           expect(matches.any? { |m| m.file.end_with?('UnrelatedLocalizationTitleView.swift') }).to be false
         end
       end
