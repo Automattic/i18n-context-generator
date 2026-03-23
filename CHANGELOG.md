@@ -20,6 +20,10 @@ _None_
 
 _None_
 
+## 0.3.0
+
+- First Gem release
+
 ## 0.2.0
 
 ### New Features
