@@ -28,15 +28,11 @@ steps:
   #################
   # Lint
   #################
-  - label: "🧹 Lint (Rubocop)"
+  - label: ":rubocop: Lint"
     key: rubocop
-    command: |
-      echo "--- :rubygems: Setting up Gems"
-      bundle install
-
-      echo "--- :rubocop: Run Rubocop"
-      bundle exec rubocop
-    plugins: *common_plugins
+    command: rubocop
+    agents:
+      queue: linter
 
   #################
   # Push to RubyGems
