@@ -74,9 +74,20 @@ module I18nContextGenerator
             next
           end
 
-          next if !existing_entry.comment.to_s.empty? || entry.comment.to_s.empty?
-
-          deduplicated_entries[identity] = entry
+          preferred_entry = if existing_entry.comment.to_s.empty? && !entry.comment.to_s.empty?
+                              entry
+                            else
+                              existing_entry
+                            end
+          deduplicated_entries[identity] = DiscoveredLocalization.new(
+            key: preferred_entry.key,
+            file: preferred_entry.file,
+            line: preferred_entry.line,
+            text: preferred_entry.text,
+            comment: preferred_entry.comment,
+            resource_type: preferred_entry.resource_type,
+            locations: (existing_entry.locations + entry.locations).uniq
+          )
         end.values
       end
 

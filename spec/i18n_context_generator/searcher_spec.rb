@@ -176,6 +176,16 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(match.match_line).not_to match(/\[["']post\.create["']\]/)
         end
       end
+
+      it 'keeps a localization call when an unrelated comparison shares its line' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'InlineComparison.swift')
+          File.write(file, 'let title = Text("settings.inline"); let ready = state == "ready"')
+          inline_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :ios)
+
+          expect(inline_searcher.search('settings.inline').map(&:file)).to eq([file])
+        end
+      end
     end
 
     describe 'match context' do
@@ -251,7 +261,8 @@ RSpec.describe I18nContextGenerator::Searcher do
           have_attributes(
             file: 'Third.swift',
             line: 30,
-            comment: 'Navigation title for settings screen'
+            comment: 'Navigation title for settings screen',
+            locations: ['First.swift:10', 'Second.swift:20', 'Third.swift:30']
           )
         )
 
@@ -264,7 +275,8 @@ RSpec.describe I18nContextGenerator::Searcher do
           have_attributes(
             file: 'First.swift',
             line: 10,
-            comment: nil
+            comment: nil,
+            locations: ['First.swift:10', 'Second.swift:20']
           )
         )
       end
@@ -489,6 +501,18 @@ RSpec.describe I18nContextGenerator::Searcher do
         expect(matches.map(&:file)).to eq([swift_file])
       end
     end
+
+    it 'does not treat a header as iOS platform evidence' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, 'Bridge.h'), '#define APP_NAME "Example"')
+        kotlin_file = File.join(dir, 'Screen.kt')
+        File.write(kotlin_file, 'val title = R.string.android_title')
+
+        searcher = described_class.new(source_paths: [dir], ignore_patterns: [])
+
+        expect(searcher.search('android_title').map(&:file)).to eq([kotlin_file])
+      end
+    end
   end
 
   describe 'ignore patterns' do
@@ -514,6 +538,64 @@ RSpec.describe I18nContextGenerator::Searcher do
 
       matches = searcher.search('multiline.accessibility.label')
       expect(matches).to be_empty
+    end
+
+    it 'matches ignored directory roots so traversal can prune them' do
+      Dir.mktmpdir do |dir|
+        ignored_dir = File.join(dir, 'build')
+        FileUtils.mkdir_p(ignored_dir)
+        File.write(File.join(ignored_dir, 'Generated.swift'), 'Text("ignored.key")')
+        searcher = described_class.new(
+          source_paths: [dir],
+          ignore_patterns: ['**/build/**'],
+          platform: :ios
+        )
+
+        expect(searcher.send(:ignored?, ignored_dir, directory: true)).to be true
+        expect(searcher.send(:discover_files)).to be_empty
+      end
+    end
+
+    it 'skips an ignored configured root without traversing it' do
+      Dir.mktmpdir do |dir|
+        build_dir = File.join(dir, 'build')
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, 'Generated.swift'), 'Text("ignored.key")')
+        searcher = described_class.new(
+          source_paths: [build_dir],
+          ignore_patterns: ['**/build/**'],
+          platform: :ios
+        )
+
+        expect(searcher.send(:discover_files)).to be_empty
+      end
+    end
+  end
+
+  describe 'source path ordering and de-duplication' do
+    it 'scans overlapping roots once while preserving configured root and file order' do
+      Dir.mktmpdir do |dir|
+        first_root = File.join(dir, 'First')
+        second_root = File.join(dir, 'Second')
+        FileUtils.mkdir_p(first_root)
+        FileUtils.mkdir_p(second_root)
+        first_file = File.join(first_root, 'B.swift')
+        second_file = File.join(second_root, 'A.swift')
+        File.write(first_file, "Text(\"first.key\")\nText(\"first.second\")\n")
+        File.write(second_file, "Text(\"second.key\")\n")
+
+        searcher = described_class.new(
+          source_paths: [second_root, dir, first_root],
+          ignore_patterns: [],
+          platform: :ios
+        )
+
+        files = searcher.send(:discover_files)
+        entries = searcher.discover_localization_entries
+
+        expect(files).to eq([second_file, first_file])
+        expect(entries.map(&:key)).to eq(%w[second.key first.key first.second])
+      end
     end
   end
 

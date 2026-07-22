@@ -21,7 +21,10 @@ module I18nContextGenerator
         return [] if line_filter.empty?
 
         entries.select do |entry|
-          line_filter.fetch(entry.file.to_s, Set.new).include?(entry.line)
+          entry.locations.any? do |location|
+            file, _, line = location.rpartition(':')
+            line_filter.fetch(file, Set.new).include?(line.to_i)
+          end
         end
       end
 
@@ -48,8 +51,11 @@ module I18nContextGenerator
       end
 
       def result_locations_for(entry, matches)
+        source_locations = entry.metadata&.dig(:source_locations)
+        return source_locations if source_locations&.any?
+
         source_location = entry.metadata&.dig(:source_location)
-        return [source_location] if source_location
+        return Array(source_location) if source_location
 
         matches.map { |m| "#{m.file}:#{m.line}" }
       end

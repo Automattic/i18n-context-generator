@@ -134,13 +134,46 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.map(&:key)).to eq(%w[key_2 key_3 key_4])
     end
 
-    it 'handles missing start_key gracefully' do
+    it 'rejects missing range boundaries' do
       config = I18nContextGenerator::Config.new(translations: [], start_key: 'nonexistent')
       extractor = described_class.new(config)
 
-      result = extractor.send(:filter_by_range, entries)
+      expect { extractor.send(:filter_by_range, entries) }
+        .to raise_error(I18nContextGenerator::Error, /start_key not found: nonexistent/)
 
-      expect(result.map(&:key)).to eq(%w[key_1 key_2 key_3 key_4 key_5])
+      end_config = I18nContextGenerator::Config.new(translations: [], end_key: 'nonexistent')
+      end_extractor = described_class.new(end_config)
+
+      expect { end_extractor.send(:filter_by_range, entries) }
+        .to raise_error(I18nContextGenerator::Error, /end_key not found: nonexistent/)
+    end
+
+    it 'rejects reversed boundaries' do
+      config = I18nContextGenerator::Config.new(translations: [], start_key: 'key_4', end_key: 'key_2')
+      extractor = described_class.new(config)
+
+      expect { extractor.send(:filter_by_range, entries) }
+        .to raise_error(I18nContextGenerator::Error, /start_key must not come after end_key/)
+    end
+
+    it 'includes all source-scoped duplicates at a range boundary' do
+      duplicate_entries = [
+        build_entry('before', 'Before'),
+        build_entry('shared', 'English', source_file: 'english.strings'),
+        build_entry('middle', 'Middle'),
+        build_entry('shared', 'French', source_file: 'french.strings'),
+        build_entry('after', 'After')
+      ]
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        start_key: 'shared',
+        end_key: 'shared'
+      )
+      extractor = described_class.new(config)
+
+      result = extractor.send(:filter_by_range, duplicate_entries)
+
+      expect(result.map(&:text)).to eq(%w[English Middle French])
     end
   end
 
@@ -215,22 +248,49 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(extractor).not_to have_received(:process_entries)
     end
 
+    it 'passes the once-resolved platform into source discovery' do
+      Dir.mktmpdir do |source_dir|
+        config = I18nContextGenerator::Config.new(
+          translations: [],
+          source_paths: [source_dir],
+          discovery_mode: 'source',
+          dry_run: true
+        )
+        extractor = described_class.new(config)
+        searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
+        allow(validator).to receive(:validate!).and_return(:ios)
+        allow(I18nContextGenerator::Searcher).to receive(:new).and_return(searcher)
+
+        extractor.run
+
+        expect(I18nContextGenerator::Searcher).to have_received(:new).with(
+          source_paths: [source_dir],
+          ignore_patterns: config.ignore_patterns,
+          context_lines: 15,
+          platform: :ios
+        )
+      end
+    end
+
     it 'prints a diff-specific message when source-mode diff filtering finds no entries' do
-      config = I18nContextGenerator::Config.new(
-        translations: [],
-        source_paths: ['Sources/'],
-        discovery_mode: 'source',
-        diff_base: 'origin/main'
-      )
-      extractor = described_class.new(config)
-      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/View.swift' => Set[10] })
+      Dir.mktmpdir do |source_dir|
+        config = I18nContextGenerator::Config.new(
+          translations: [],
+          source_paths: [source_dir],
+          discovery_mode: 'source',
+          diff_base: 'origin/main'
+        )
+        extractor = described_class.new(config)
+        git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/View.swift' => Set[10] })
 
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
-      allow(extractor).to receive(:searcher).and_return(
-        instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
-      )
+        allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+        allow(extractor).to receive(:searcher).and_return(
+          instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
+        )
 
-      expect { extractor.run }.to output("No changed source localization entries found since origin/main.\n").to_stdout
+        expect { extractor.run }
+          .to output("No changed source localization entries found since origin/main.\n").to_stdout
+      end
     end
   end
 
@@ -270,9 +330,40 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           source_file: 'test.strings',
           metadata: {
             comment: 'Shown in settings screen',
-            source_location: 'SettingsViewController.swift:12'
+            source_location: 'SettingsViewController.swift:12',
+            source_locations: ['SettingsViewController.swift:12']
           }
         )
+      )
+    end
+
+    it 'hydrates every source-scoped translation with the same key' do
+      config = I18nContextGenerator::Config.new(
+        translations: %w[english.strings french.strings],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entry = I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+        key: 'settings.title',
+        file: 'SettingsView.swift',
+        line: 12
+      )
+      translations = [
+        build_entry('settings.title', 'Settings', source_file: 'english.strings'),
+        build_entry('settings.title', 'Réglages', source_file: 'french.strings')
+      ]
+      searcher = instance_double(
+        I18nContextGenerator::Searcher,
+        discover_localization_entries: [discovered_entry]
+      )
+
+      allow(extractor).to receive_messages(searcher: searcher, load_translations: translations)
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries.map { |entry| [entry.source_file, entry.text] }).to eq(
+        [['english.strings', 'Settings'], ['french.strings', 'Réglages']]
       )
     end
 
@@ -305,7 +396,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           source_file: nil,
           metadata: {
             comment: 'Button title in the editor',
-            source_location: 'EditorViewController.swift:18'
+            source_location: 'EditorViewController.swift:18',
+            source_locations: ['EditorViewController.swift:18']
           }
         )
       )
@@ -406,7 +498,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         have_attributes(
           key: 'settings.title',
           text: 'Settings',
-          metadata: { comment: 'Visible title', source_location: 'Sources/SettingsView.swift:12' }
+          metadata: {
+            comment: 'Visible title',
+            source_location: 'Sources/SettingsView.swift:12',
+            source_locations: ['Sources/SettingsView.swift:12']
+          }
         )
       )
     end
@@ -447,8 +543,41 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         have_attributes(
           key: 'settings.subtitle',
           text: 'Manage store',
-          metadata: { comment: 'Visible subtitle', source_location: 'Sources/SettingsView.swift:18' }
+          metadata: {
+            comment: 'Visible subtitle',
+            source_location: 'Sources/SettingsView.swift:18',
+            source_locations: ['Sources/SettingsView.swift:18']
+          }
         )
+      )
+    end
+
+    it 'keeps a deduplicated key when any evidence location changed' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source',
+        source_line_filter: { 'Sources/First.swift' => [10] }
+      )
+      extractor = described_class.new(config)
+      discovered_entry = I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+        key: 'settings.title',
+        file: 'Sources/Preferred.swift',
+        line: 30,
+        comment: 'Preferred comment',
+        locations: ['Sources/First.swift:10', 'Sources/Preferred.swift:30']
+      )
+      searcher = instance_double(
+        I18nContextGenerator::Searcher,
+        discover_localization_entries: [discovered_entry]
+      )
+
+      allow(extractor).to receive(:searcher).and_return(searcher)
+
+      entry = extractor.send(:load_source_entries).first
+
+      expect(entry.metadata[:source_locations]).to eq(
+        ['Sources/First.swift:10', 'Sources/Preferred.swift:30']
       )
     end
   end
@@ -583,13 +712,14 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(cache).not_to have_received(:set)
     end
 
-    it 'prefers the discovered source location over usage matches when present' do
+    it 'returns all discovery evidence locations ahead of later usage matches' do
       source_entry = build_entry(
         'settings.title',
         'Settings',
         metadata: {
           comment: 'Shown in the settings navigation bar',
-          source_location: '/tmp/SettingsView.swift:14'
+          source_location: '/tmp/SettingsView.swift:14',
+          source_locations: ['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14']
         }
       )
       searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
@@ -604,7 +734,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       result = extractor.send(:process_entry, source_entry)
 
-      expect(result.locations).to eq(['/tmp/SettingsView.swift:14'])
+      expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
     end
 
     it 'omits translation comments when the config disables them' do
@@ -713,28 +843,74 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
   end
 
   describe '#load_translations' do
-    it 'warns about missing files and parses the ones that exist' do
+    it 'passes per-file locale configuration to the parser' do
       Dir.mktmpdir do |dir|
-        existing = File.join(dir, 'Localizable.strings')
-        missing = File.join(dir, 'Missing.strings')
-        File.write(existing, '"settings.title" = "Settings";')
+        existing = File.join(dir, 'translations.yml')
+        File.write(existing, "en:\n  settings:\n    title: Settings\n")
 
-        config = I18nContextGenerator::Config.new(translations: [existing, missing])
+        config = I18nContextGenerator::Config.new(
+          translations: [existing],
+          translation_locales: { existing => 'en' }
+        )
         extractor = described_class.new(config)
         parser = instance_double(
-          I18nContextGenerator::Parsers::StringsParser,
+          I18nContextGenerator::Parsers::YamlParser,
           parse: [build_entry('settings.title', 'Settings')]
         )
 
-        allow(I18nContextGenerator::Parsers::Base).to receive(:for).with(existing).and_return(parser)
+        allow(I18nContextGenerator::Parsers::Base).to receive(:for).with(existing, locale: 'en').and_return(parser)
 
-        result = nil
-        expect do
-          result = extractor.send(:load_translations)
-        end.to output(/Translation file not found: #{Regexp.escape(missing)}/).to_stderr
+        result = extractor.send(:load_translations)
 
         expect(result.map(&:key)).to eq(['settings.title'])
       end
+    end
+
+    it 'preserves configured file and parser order, including cross-file duplicate keys' do
+      Dir.mktmpdir do |dir|
+        second_path = File.join(dir, 'second.json')
+        first_path = File.join(dir, 'first.json')
+        File.write(second_path, '{"second":"Second","shared":"Deuxième"}')
+        File.write(first_path, '{"first":"First","shared":"Premier"}')
+        config = I18nContextGenerator::Config.new(translations: [second_path, first_path])
+        extractor = described_class.new(config)
+
+        entries = extractor.send(:load_translations)
+
+        expect(entries.map { |entry| [File.basename(entry.source_file), entry.key] }).to eq(
+          [['second.json', 'second'], ['second.json', 'shared'], ['first.json', 'first'], ['first.json', 'shared']]
+        )
+      end
+    end
+
+    it 'deduplicates identical source keys and rejects conflicting values in one file' do
+      config = I18nContextGenerator::Config.new(translations: [])
+      extractor = described_class.new(config)
+      duplicate_entries = [
+        build_entry('shared', 'Same', source_file: 'same.strings'),
+        build_entry('shared', 'Same', source_file: 'same.strings')
+      ]
+
+      expect(extractor.send(:validate_translation_entries, duplicate_entries).size).to eq(1)
+
+      conflicting_entries = duplicate_entries + [
+        build_entry('shared', 'Different', source_file: 'same.strings')
+      ]
+      expect { extractor.send(:validate_translation_entries, conflicting_entries) }
+        .to raise_error(I18nContextGenerator::Error, /Conflicting duplicate translation keys.*same\.strings:shared/)
+    end
+
+    it 'rejects structurally invalid parser entries' do
+      config = I18nContextGenerator::Config.new(translations: [])
+      extractor = described_class.new(config)
+      invalid_entry = I18nContextGenerator::Parsers::TranslationEntry.new(
+        key: nil,
+        text: 'Missing key',
+        source_file: 'strings.xml'
+      )
+
+      expect { extractor.send(:validate_translation_entries, [invalid_entry]) }
+        .to raise_error(I18nContextGenerator::Error, /Invalid translation entry in strings\.xml/)
     end
   end
 
@@ -801,8 +977,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
   private
 
-  def build_entry(key, text, metadata: nil)
-    I18nContextGenerator::Parsers::TranslationEntry.new(key: key, text: text, source_file: 'test.strings', metadata: metadata)
+  def build_entry(key, text, metadata: nil, source_file: 'test.strings')
+    I18nContextGenerator::Parsers::TranslationEntry.new(
+      key: key,
+      text: text,
+      source_file: source_file,
+      metadata: metadata
+    )
   end
 
   def build_match(file:, line:, match_line:, context:, enclosing_scope:)
