@@ -73,9 +73,9 @@ module I18nContextGenerator
           line, = XmlScanner.without_comments(line, state[:xml_comment_state])
           track_android_collection_parent(state, line)
           item_count = line.scan(/<item\b/).size
-          state[:ambiguous_parent] = true if item_count > 1 && state[:parent_name]
           track_android_collection_item(state, line)
-          member = state[:member] if state[:parent_name] == expected_parent && !state[:ambiguous_parent]
+          advance_android_array_for_additional_items(state, item_count)
+          member = state[:member] if state[:parent_name] == expected_parent && item_count <= 1
           return member if line_number == target_line
 
           close_android_collection_elements(state, line)
@@ -91,7 +91,6 @@ module I18nContextGenerator
           member: nil,
           pending_parent: nil,
           pending_item: nil,
-          ambiguous_parent: false,
           xml_comment_state: {}
         }
       end
@@ -111,7 +110,6 @@ module I18nContextGenerator
           state[:parent_type] = type
           state[:parent_name] = name
           state[:array_index] = -1
-          state[:ambiguous_parent] = false
         end
         state[:pending_parent] = nil
       end
@@ -137,6 +135,12 @@ module I18nContextGenerator
         state[:pending_item] = nil
       end
 
+      def advance_android_array_for_additional_items(state, item_count)
+        return unless state[:parent_type] == 'string-array' && item_count > 1
+
+        state[:array_index] += item_count - 1
+      end
+
       def close_android_collection_elements(state, line)
         state[:member] = nil if line.include?('</item>') || line.match?(%r{<item\b[^>]*/>})
         return unless line.match?(%r{</(?:plurals|string-array)>})
@@ -144,7 +148,6 @@ module I18nContextGenerator
         state[:parent_name] = nil
         state[:parent_type] = nil
         state[:member] = nil
-        state[:ambiguous_parent] = false
       end
 
       def git_diff
