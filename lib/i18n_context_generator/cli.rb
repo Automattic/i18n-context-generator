@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'thor'
+require_relative 'config'
 
 module I18nContextGenerator
   # Thor-based CLI entry point for the i18n-context-generator command.
@@ -28,43 +29,9 @@ module I18nContextGenerator
         # Use config file
         i18n-context-generator extract --config .i18n-context-generator.yml
     DESC
-    option :config, aliases: '-c', desc: 'Path to config file (.i18n-context-generator.yml)'
-    option :translations, aliases: '-t', desc: 'Translation file(s), comma-separated'
-    option :source, aliases: '-s', desc: 'Source directory(ies) to search, comma-separated'
-    option :output, aliases: '-o', desc: 'Output file path (.csv or .json; format inferred when omitted)'
-    option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (inferred from output path, default: csv)'
-    option :provider, aliases: '-p', enum: %w[anthropic openai], desc: 'LLM provider (default: anthropic)'
-    option :model, aliases: '-m', desc: 'LLM model to use'
-    option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
-    option :discovery_mode, type: :string, enum: %w[auto translations source],
-                            desc: 'How to discover entries: auto, translations, or source (default: auto)'
-    option :platform, type: :string, enum: %w[ios android],
-                      desc: 'Explicit platform override: ios or android'
-    option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
-    option :max_prompt_chars, type: :numeric,
-                              desc: 'Maximum characters sent per LLM prompt (default: 50000)'
-    option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
-    option :cache, type: :boolean, desc: 'Enable caching of LLM results'
-    option :cache_dir, type: :string,
-                       desc: 'Cache directory (default: .i18n-context-generator-cache)'
-    option :write_back, type: :boolean,
-                        desc: 'Write context back to source translation files (.strings, strings.xml)'
-    option :write_back_to_code, type: :boolean,
-                                desc: 'Write context back to Swift source code comment: parameters'
-    option :diff_base, type: :string, desc: 'Only process keys changed since this git ref (e.g., main, origin/main)'
-    option :diff_head, type: :string, desc: 'Compare --diff-base to this git ref (default: HEAD)'
-    option :context_prefix, type: :string,
-                            desc: 'Prefix for context comments (default: "Context: ", use empty string for none)'
-    option :context_mode, type: :string, enum: %w[replace append],
-                          desc: 'How to handle existing comments: replace or append (default: replace)'
-    option :start_key, type: :string, desc: 'Start processing from this key (inclusive)'
-    option :end_key, type: :string, desc: 'Stop processing at this key (inclusive)'
-    option :include_file_paths, type: :boolean,
-                                desc: 'Include full source file paths in LLM prompts (default: false)'
-    option :include_translation_comments, type: :boolean,
-                                          desc: 'Include translation file comments in LLM prompts (default: true)'
-    option :redact_prompts, type: :boolean,
-                            desc: 'Best-effort redact likely secrets and PII from LLM prompts (default: true)'
+    Config::Schema.cli_definitions.each do |definition|
+      option definition.cli_name, **definition.thor_options
+    end
 
     def extract
       validate_options!
@@ -173,6 +140,9 @@ module I18nContextGenerator
     end
 
     def sample_config
+      schema = Config::Schema
+      swift_functions = schema.default(:swift_functions).map { |function| "    - #{function.inspect}" }.join("\n")
+
       <<~YAML
         # i18n-context-generator configuration
         # Extract translation context from mobile app source code
@@ -201,8 +171,8 @@ module I18nContextGenerator
 
         # LLM configuration
         llm:
-          provider: anthropic
-          model: claude-sonnet-4-6
+          provider: #{schema.default(:provider)}
+          # model: provider-specific default
           # API key is read from the matching provider env var
           # (ANTHROPIC_API_KEY or OPENAI_API_KEY)
 
@@ -211,50 +181,48 @@ module I18nContextGenerator
           # Optional explicit platform override: ios or android
           # platform: ios
           # Discovery mode: auto, translations, or source
-          discovery_mode: auto
-          concurrency: 5
-          context_lines: 15
-          max_matches_per_key: 3
+          discovery_mode: #{schema.default(:discovery_mode)}
+          concurrency: #{schema.default(:concurrency)}
+          context_lines: #{schema.default(:context_lines)}
+          max_matches_per_key: #{schema.default(:max_matches_per_key)}
           # Hard character limit for each prompt; oversized context is truncated
-          max_prompt_chars: 50000
+          max_prompt_chars: #{schema.default(:max_prompt_chars)}
 
         # Optional local cache. Only successful results are cached.
         cache:
-          enabled: false
-          directory: .i18n-context-generator-cache
+          enabled: #{schema.default(:cache_enabled)}
+          directory: #{schema.default(:cache_dir)}
 
         # Output configuration
         output:
-          format: csv
+          format: #{schema.default(:output_format)}
           path: translation-context.csv
           # Set to true to write context comments back to translation files (.strings, strings.xml)
-          write_back: false
+          write_back: #{schema.default(:write_back)}
           # Set to true to write context back to Swift source code comment: parameters
-          write_back_to_code: false
+          write_back_to_code: #{schema.default(:write_back_to_code)}
           # Prefix for context comments (use empty string for no prefix)
-          # context_prefix: "Context: "
+          # context_prefix: #{schema.default(:context_prefix).inspect}
           # How to handle existing comments: "replace" or "append"
-          # context_mode: replace
+          # context_mode: #{schema.default(:context_mode)}
 
         # Swift-specific configuration for write_back_to_code
         swift:
           # Localization functions to update (default shown)
           functions:
-            - NSLocalizedString
-            - "String(localized:"
-            - "Text("
+        #{swift_functions}
             # Add custom functions like:
             # - "MyLocalizedString("
 
         # Prompt privacy controls
         privacy:
           # Include full source paths in prompts sent to the LLM (default: false)
-          include_file_paths: false
+          include_file_paths: #{schema.default(:include_file_paths)}
           # Include translation file comments in prompts (default: true)
-          include_translation_comments: true
+          include_translation_comments: #{schema.default(:include_translation_comments)}
           # Best-effort redact likely secrets, URLs, and emails before sending prompts.
           # Source snippets still leave the machine when using a remote provider.
-          redact_prompts: true
+          redact_prompts: #{schema.default(:redact_prompts)}
       YAML
     end
   end

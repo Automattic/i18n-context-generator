@@ -130,6 +130,32 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(sample).to include('Source snippets still leave the machine')
       expect(sample).not_to include('- "**/Pods/**"', '- "**/build/**"', '- "**/*Tests*"')
     end
+
+    it 'uses schema defaults and emits valid YAML' do
+      sample = described_class.allocate.send(:sample_config)
+      parsed = YAML.safe_load(sample)
+      schema = I18nContextGenerator::Config::Schema
+
+      expect(parsed.dig('llm', 'provider')).to eq(schema.default(:provider))
+      expect(parsed.dig('processing', 'concurrency')).to eq(schema.default(:concurrency))
+      expect(parsed.dig('processing', 'max_prompt_chars')).to eq(schema.default(:max_prompt_chars))
+      expect(parsed.dig('cache', 'enabled')).to eq(schema.default(:cache_enabled))
+      expect(parsed.dig('cache', 'directory')).to eq(schema.default(:cache_dir))
+      expect(parsed.dig('swift', 'functions')).to eq(schema.default(:swift_functions))
+      expect(parsed.dig('privacy', 'redact_prompts')).to eq(schema.default(:redact_prompts))
+    end
+  end
+
+  describe 'configuration schema' do
+    it 'drives CLI types, enums, and default descriptions' do
+      options = described_class.commands.fetch('extract').options
+      schema = I18nContextGenerator::Config::Schema
+
+      expect(options.fetch(:provider).enum).to eq(schema.values(:provider))
+      expect(options.fetch(:concurrency).type).to eq(:numeric)
+      expect(options.fetch(:concurrency).description).to include("default: #{schema.default(:concurrency)}")
+      expect(options.fetch(:redact_prompts).description).to include("default: #{schema.default(:redact_prompts)}")
+    end
   end
 
   describe '#extract' do

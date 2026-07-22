@@ -103,7 +103,8 @@ source:
 
 llm:
   provider: anthropic
-  model: claude-sonnet-4-6
+  # Optional; each provider has its own default model.
+  # model: claude-sonnet-4-6
 
 processing:
   concurrency: 5
@@ -124,6 +125,8 @@ output:
   context_mode: replace
 
 swift:
+  # These syntaxes are used by extraction and Swift comment write-back.
+  # Include the defaults below alongside any custom localization functions.
   functions:
     - NSLocalizedString
     - "String(localized:"
@@ -138,6 +141,7 @@ privacy:
 
 Use a separate config for Android instead of mixing iOS and Android paths in the same run.
 Client `source.ignore` entries extend the built-in ignore list; they do not replace it.
+Configured `swift.functions` are used consistently for usage search, source-first discovery, and `--write-back-to-code`. A custom function may be written as either `MyLocalizedString` or `MyLocalizedString(`; its first string argument is treated as the translation key.
 
 ## CLI Reference
 
