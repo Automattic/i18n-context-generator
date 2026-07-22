@@ -15,9 +15,9 @@ module I18nContextGenerator
 
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
-                                   :max_length, :locations, :error) do
+                                   :max_length, :locations, :changed_locations, :error) do
       def initialize(key:, text:, description:, source_file: nil, ui_element: nil, tone: nil,
-                     max_length: nil, locations: [], error: nil)
+                     max_length: nil, locations: [], changed_locations: [], error: nil)
         super
       end
 
@@ -31,6 +31,7 @@ module I18nContextGenerator
           tone: tone,
           max_length: max_length,
           locations: locations,
+          changed_locations: changed_locations,
           error: error
         }
       end
@@ -132,11 +133,10 @@ module I18nContextGenerator
     end
 
     def filter_by_diff(entries)
-      git_diff = GitDiff.new(base_ref: @config.diff_base)
       changed_keys = git_diff.changed_keys(@config.translations)
 
       if changed_keys.empty?
-        puts "No changes detected in translation files since #{@config.diff_base}"
+        puts "No changes detected in translation files for #{@config.diff_base}...#{@config.diff_head}"
         return []
       end
 
@@ -260,7 +260,7 @@ module I18nContextGenerator
 
       # Check cache with match context included
       cached = cache.get(entry.key, entry.text, context: cache_ctx)
-      return cached_extraction_result(entry, cached) if cached && !(cached[:error] || cached['error'])
+      return cached_extraction_result(entry, cached, matches) if cached && !(cached[:error] || cached['error'])
 
       # Get context from LLM
       llm_result = llm.generate_context(
@@ -273,6 +273,7 @@ module I18nContextGenerator
         redact_prompts: @config.redact_prompts
       )
 
+      result_locations = result_locations_for(entry, matches)
       result = ExtractionResult.new(
         key: entry.key,
         text: entry.text,
@@ -281,16 +282,35 @@ module I18nContextGenerator
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
-        locations: result_locations_for(entry, matches),
+        locations: result_locations,
+        changed_locations: changed_result_locations_for(result_locations),
         error: llm_result.error
       )
 
-      cache.set(entry.key, entry.text, result.to_h.except(:source_file), context: cache_ctx) unless result.error
+      unless result.error
+        cache.set(
+          entry.key,
+          entry.text,
+          result.to_h.except(:source_file, :changed_locations),
+          context: cache_ctx
+        )
+      end
       result
     end
 
-    def cached_extraction_result(entry, cached)
-      ExtractionResult.new(source_file: entry.source_file, **cached.transform_keys(&:to_sym))
+    def cached_extraction_result(entry, cached, matches)
+      attributes = cached.transform_keys(&:to_sym).except(:source_file, :locations, :changed_locations)
+      locations = result_locations_for(entry, matches)
+      ExtractionResult.new(
+        source_file: entry.source_file,
+        locations: locations,
+        changed_locations: changed_result_locations_for(locations),
+        **attributes
+      )
+    end
+
+    def git_diff
+      @git_diff ||= GitDiff.new(base_ref: @config.diff_base, head_ref: @config.diff_head)
     end
 
     def write_output

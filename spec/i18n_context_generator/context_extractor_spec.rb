@@ -13,6 +13,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.text).to eq('Hello')
       expect(result.description).to eq('A greeting')
       expect(result.locations).to eq([])
+      expect(result.changed_locations).to eq([])
       expect(result.error).to be_nil
     end
 
@@ -20,7 +21,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
         key: 'k', text: 't', description: 'd',
         ui_element: 'button', tone: 'formal',
-        max_length: 20, locations: ['file.swift:10']
+        max_length: 20, locations: ['file.swift:10'], changed_locations: ['file.swift:10']
       )
 
       h = result.to_h
@@ -28,6 +29,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(h[:key]).to eq('k')
       expect(h[:ui_element]).to eq('button')
       expect(h[:locations]).to eq(['file.swift:10'])
+      expect(h[:changed_locations]).to eq(['file.swift:10'])
     end
   end
 
@@ -190,7 +192,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         build_entry('settings.title', 'Settings')
       ]
 
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       result = extractor.send(:filter_by_diff, entries)
 
@@ -205,7 +208,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       extractor = described_class.new(config)
       git_diff = instance_double(I18nContextGenerator::GitDiff, changed_keys: Set.new)
 
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       expect(extractor.send(:filter_by_diff, [build_entry('settings.title', 'Settings')])).to eq([])
     end
@@ -283,13 +287,14 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         extractor = described_class.new(config)
         git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/View.swift' => Set[10] })
 
-        allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
         allow(extractor).to receive(:searcher).and_return(
           instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
         )
 
         expect { extractor.run }
-          .to output("No changed source localization entries found since origin/main.\n").to_stdout
+          .to output("No changed source localization entries found in origin/main...HEAD.\n").to_stdout
       end
     end
   end
@@ -535,7 +540,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/SettingsView.swift' => Set[18] })
 
       allow(extractor).to receive(:searcher).and_return(searcher)
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       entries = extractor.send(:load_source_entries)
 
@@ -737,6 +743,35 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
     end
 
+    it 'separates changed discovery locations from all evidence locations' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        discovery_mode: :source,
+        source_line_filter: { 'Sources/FirstSettingsView.swift' => [8] }
+      )
+      extractor = described_class.new(config)
+      source_entry = build_entry(
+        'settings.title',
+        'Settings',
+        metadata: {
+          source_locations: ['./Sources/FirstSettingsView.swift:8', './Sources/SettingsView.swift:14']
+        }
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache = instance_double(I18nContextGenerator::Cache, get: nil, set: nil)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+
+      allow(llm).to receive(:generate_context).and_return(
+        I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+      )
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      result = extractor.send(:process_entry, source_entry)
+
+      expect(result.locations).to eq(['./Sources/FirstSettingsView.swift:8', './Sources/SettingsView.swift:14'])
+      expect(result.changed_locations).to eq(['./Sources/FirstSettingsView.swift:8'])
+    end
+
     it 'omits translation comments when the config disables them' do
       config = I18nContextGenerator::Config.new(
         translations: [],
@@ -759,6 +794,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
     end
 
     it 'returns cached results without calling the llm again' do
+      cached_config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_line_filter: { '/tmp/SettingsViewController.swift' => [10] }
+      )
+      cached_extractor = described_class.new(cached_config)
       searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
       cache = instance_double(
         I18nContextGenerator::Cache,
@@ -766,19 +806,20 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           'key' => 'settings.title',
           'text' => 'Settings',
           'description' => 'Cached description',
-          'locations' => ['/tmp/SettingsViewController.swift:10']
+          'locations' => ['stale.swift:99']
         }
       )
       llm = instance_double(I18nContextGenerator::LLM::OpenAI)
 
       allow(llm).to receive(:generate_context)
-      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+      allow(cached_extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
 
-      result = extractor.send(:process_entry, entry)
+      result = cached_extractor.send(:process_entry, entry)
 
       expect(llm).not_to have_received(:generate_context)
       expect(result.description).to eq('Cached description')
       expect(result.locations).to eq(['/tmp/SettingsViewController.swift:10'])
+      expect(result.changed_locations).to eq(['/tmp/SettingsViewController.swift:10'])
     end
 
     it 'ignores cached failures and calls the llm again' do

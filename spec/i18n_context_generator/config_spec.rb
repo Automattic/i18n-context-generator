@@ -24,6 +24,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.redact_prompts).to be true
       expect(config.discovery_mode).to eq('auto')
       expect(config.platform).to be_nil
+      expect(config.diff_head).to eq('HEAD')
       expect(config.translation_locales).to eq({})
       expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
     end
@@ -102,6 +103,29 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.include_file_paths).to be false
       expect(config.include_translation_comments).to be true
       expect(config.redact_prompts).to be true
+    end
+
+    it 'normalizes enum-like Ruby API values to strings' do
+      config = described_class.new(
+        provider: :openai,
+        output_format: :json,
+        context_mode: :append,
+        discovery_mode: :source,
+        platform: :ios,
+        diff_base: 'danger_base',
+        diff_head: 'danger_head'
+      )
+
+      expect(config).to have_attributes(
+        provider: 'openai',
+        output_format: 'json',
+        context_mode: 'append',
+        discovery_mode: 'source',
+        platform: 'ios',
+        diff_base: 'danger_base',
+        diff_head: 'danger_head'
+      )
+      expect { config.validate! }.not_to raise_error
     end
   end
 
@@ -260,6 +284,7 @@ RSpec.describe I18nContextGenerator::Config do
         keys: 'key1,key2',
         write_back: true,
         diff_base: 'origin/main',
+        diff_head: 'feature/head',
         context_prefix: 'Note: ',
         context_mode: 'append',
         include_file_paths: true,
@@ -282,6 +307,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.key_filter).to eq('key1,key2')
       expect(config.write_back).to be true
       expect(config.diff_base).to eq('origin/main')
+      expect(config.diff_head).to eq('feature/head')
       expect(config.context_prefix).to eq('Note: ')
       expect(config.context_mode).to eq('append')
       expect(config.include_file_paths).to be true
@@ -434,10 +460,10 @@ RSpec.describe I18nContextGenerator::Config do
     end
 
     it 'rejects blank optional strings' do
-      config = described_class.new(output_path: ' ', diff_base: '')
+      config = described_class.new(output_path: ' ', diff_base: '', diff_head: '')
 
       expect { config.validate! }
-        .to raise_error(I18nContextGenerator::Error, /output_path must be a non-empty string.*diff_base/)
+        .to raise_error(I18nContextGenerator::Error, /output_path must be a non-empty string.*diff_base.*diff_head/)
     end
 
     it 'rejects missing translation and source paths' do

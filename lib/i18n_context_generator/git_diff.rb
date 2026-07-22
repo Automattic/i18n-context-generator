@@ -6,8 +6,9 @@ require 'pathname'
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
   class GitDiff
-    def initialize(base_ref: 'main')
+    def initialize(base_ref: 'main', head_ref: 'HEAD')
       @base_ref = base_ref
+      @head_ref = head_ref
     end
 
     # Get keys that were added or modified since the base ref
@@ -52,15 +53,27 @@ module I18nContextGenerator
       system('git', 'rev-parse', '--verify', @base_ref, out: File::NULL, err: File::NULL)
     end
 
+    def head_ref_exists?
+      system('git', 'rev-parse', '--verify', @head_ref, out: File::NULL, err: File::NULL)
+    end
+
     private
 
     def git_diff_for_path(path)
       # Run git from the directory containing the file so the correct repo is used
       dir = File.directory?(path) ? path : File.dirname(path)
       pathspec = File.directory?(path) ? '.' : File.basename(path)
-      # Use triple-dot to get changes on current branch since it diverged from base
-      stdout, _stderr, status = Open3.capture3('git', 'diff', "#{@base_ref}...HEAD", '--', pathspec, chdir: dir)
-      status.success? ? stdout : ''
+      # Use triple-dot to get changes on the configured head since it diverged from base.
+      stdout, stderr, status = Open3.capture3(
+        'git', 'diff', "#{@base_ref}...#{@head_ref}", '--', pathspec, chdir: dir
+      )
+      return stdout if status.success?
+
+      detail = stderr.strip
+      detail = 'git exited unsuccessfully without an error message' if detail.empty?
+      raise Error, "Git diff failed for #{@base_ref}...#{@head_ref} (#{path}): #{detail}"
+    rescue SystemCallError => e
+      raise Error, "Git diff failed for #{@base_ref}...#{@head_ref} (#{path}): #{e.message}"
     end
 
     def extract_changed_lines(diff_output, path)
@@ -98,7 +111,7 @@ module I18nContextGenerator
     def resolve_diff_file_path(path, diff_file_path)
       return Pathname.new(path).cleanpath.to_s if File.file?(path)
 
-      normalized_path = path.to_s.sub(%r{/\z}, '')
+      normalized_path = Pathname.new(path).cleanpath.to_s
       return Pathname.new(diff_file_path).cleanpath.to_s if normalized_path.empty? || normalized_path == '.'
       return Pathname.new(diff_file_path).cleanpath.to_s if diff_file_path == normalized_path || diff_file_path.start_with?("#{normalized_path}/")
 

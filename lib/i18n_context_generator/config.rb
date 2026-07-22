@@ -1,6 +1,6 @@
 # frozen_string_literal: true
 
-require 'set'
+require 'set' # rubocop:disable Lint/RedundantRequireStatement -- required when Config is loaded directly
 require_relative 'config/validation'
 
 module I18nContextGenerator
@@ -12,7 +12,7 @@ module I18nContextGenerator
                 :provider, :model, :concurrency, :context_lines,
                 :max_matches_per_key, :output_path, :output_format,
                 :no_cache, :dry_run, :key_filter, :write_back,
-                :swift_functions, :write_back_to_code, :diff_base, :context_prefix,
+                :swift_functions, :write_back_to_code, :diff_base, :diff_head, :context_prefix,
                 :context_mode, :start_key, :end_key, :include_file_paths,
                 :include_translation_comments, :redact_prompts, :discovery_mode,
                 :platform, :translation_locales
@@ -32,14 +32,14 @@ module I18nContextGenerator
       @source_line_filter = fetch_config_value(attrs, :source_line_filter, nil)
       @translation_locales = fetch_defaulting_value(attrs, :translation_locales, {})
       @ignore_patterns = self.class.merge_ignore_patterns(fetch_defaulting_value(attrs, :ignore_patterns, []))
-      @provider = fetch_defaulting_value(attrs, :provider, 'anthropic')
+      @provider = normalize_enum_value(fetch_defaulting_value(attrs, :provider, 'anthropic'))
       @model = fetch_config_value(attrs, :model, nil)
       @concurrency = fetch_defaulting_value(attrs, :concurrency, 5)
       @context_lines = fetch_defaulting_value(attrs, :context_lines, 15)
       @max_matches_per_key = fetch_defaulting_value(attrs, :max_matches_per_key, 3)
       @output_path = fetch_config_value(attrs, :output_path, nil)
       @output_format_explicit = attrs.key?(:output_format) && !attrs[:output_format].nil?
-      @output_format = resolve_output_format(attrs[:output_format], @output_path)
+      @output_format = normalize_enum_value(resolve_output_format(attrs[:output_format], @output_path))
       @no_cache = fetch_boolean_value(attrs, :no_cache, true)
       @dry_run = fetch_boolean_value(attrs, :dry_run, false)
       @key_filter = fetch_config_value(attrs, :key_filter, nil)
@@ -47,15 +47,16 @@ module I18nContextGenerator
       @write_back_to_code = fetch_boolean_value(attrs, :write_back_to_code, false)
       @swift_functions = fetch_defaulting_value(attrs, :swift_functions, default_swift_functions)
       @diff_base = fetch_config_value(attrs, :diff_base, nil)
+      @diff_head = fetch_defaulting_value(attrs, :diff_head, 'HEAD')
       @context_prefix = fetch_defaulting_value(attrs, :context_prefix, DEFAULT_CONTEXT_PREFIX)
-      @context_mode = fetch_defaulting_value(attrs, :context_mode, DEFAULT_CONTEXT_MODE)
+      @context_mode = normalize_enum_value(fetch_defaulting_value(attrs, :context_mode, DEFAULT_CONTEXT_MODE))
       @start_key = fetch_config_value(attrs, :start_key, nil)
       @end_key = fetch_config_value(attrs, :end_key, nil)
       @include_file_paths = fetch_boolean_value(attrs, :include_file_paths, false)
       @include_translation_comments = fetch_boolean_value(attrs, :include_translation_comments, true)
       @redact_prompts = fetch_boolean_value(attrs, :redact_prompts, true)
-      @discovery_mode = fetch_defaulting_value(attrs, :discovery_mode, 'auto')
-      @platform = fetch_config_value(attrs, :platform, nil)
+      @discovery_mode = normalize_enum_value(fetch_defaulting_value(attrs, :discovery_mode, 'auto'))
+      @platform = normalize_enum_value(fetch_config_value(attrs, :platform, nil))
     end
 
     def default_swift_functions
@@ -149,6 +150,7 @@ module I18nContextGenerator
         write_back: options[:write_back] || false,
         write_back_to_code: options[:write_back_to_code] || false,
         diff_base: options[:diff_base],
+        diff_head: options[:diff_head],
         start_key: options[:start_key],
         end_key: options[:end_key]
       }
@@ -287,6 +289,7 @@ module I18nContextGenerator
         discovery_mode: :discovery_mode,
         platform: :platform,
         diff_base: :diff_base,
+        diff_head: :diff_head,
         context_prefix: :context_prefix,
         context_mode: :context_mode,
         start_key: :start_key,
@@ -295,13 +298,15 @@ module I18nContextGenerator
 
       scalar_mappings.each do |attr_name, option_name|
         value = options[option_name]
+        value = normalize_enum_value(value) if %i[discovery_mode platform context_mode].include?(attr_name)
         instance_variable_set(:"@#{attr_name}", value) unless value.nil?
       end
     end
 
     def merge_cli_provider_and_model(options)
-      if options[:provider] && options[:provider] != @provider
-        @provider = options[:provider]
+      provider = normalize_enum_value(options[:provider])
+      if provider && provider != @provider
+        @provider = provider
         @model = nil unless options[:model]
       end
       @model = options[:model] if options[:model]
@@ -310,7 +315,7 @@ module I18nContextGenerator
     def merge_cli_output(options)
       @output_path = options[:output] if options[:output]
       if options[:format]
-        @output_format = options[:format]
+        @output_format = normalize_enum_value(options[:format])
         @output_format_explicit = true
       elsif options[:output] && !@output_format_explicit
         @output_format = resolve_output_format(nil, @output_path)
@@ -338,6 +343,10 @@ module I18nContextGenerator
       return configured_format unless configured_format.nil?
 
       VALID_OUTPUT_EXTENSIONS.fetch(File.extname(output_path.to_s).downcase, 'csv')
+    end
+
+    def normalize_enum_value(value)
+      value&.to_s
     end
 
     def deduplicate_paths(paths)
