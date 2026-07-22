@@ -51,17 +51,21 @@ module I18nContextGenerator
       private
 
       def build_comment(existing_comment, context_description)
-        context_line = "#{@context_prefix}#{context_description}"
+        context_line = sanitize_comment("#{@context_prefix}#{context_description}")
 
         if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
           context_line
         elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
           # Replace existing context line (idempotent update)
-          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/) { context_line }
         else
           # Append context to existing comment
           "#{existing_comment}\n#{context_line}"
         end
+      end
+
+      def sanitize_comment(comment)
+        comment.gsub('*/', '* /')
       end
     end
   end

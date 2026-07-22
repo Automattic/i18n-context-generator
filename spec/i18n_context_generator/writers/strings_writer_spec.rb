@@ -76,6 +76,25 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
       end
     end
 
+    it 'escapes comment terminators in generated context and remains idempotent' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, '"settings.title" = "Settings";')
+
+        writer = described_class.new
+        results = [build_result('settings.title', 'Shown after */ completes the task')]
+
+        writer.write(results, path)
+        first_output = File.read(path)
+        writer.write(results, path)
+
+        expect(parsed_comments(path)['settings.title']).to eq(
+          'Context: Shown after * / completes the task'
+        )
+        expect(File.read(path)).to eq(first_output)
+      end
+    end
+
     it 'skips placeholder descriptions and leaves comments unchanged' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'Localizable.strings')
