@@ -45,14 +45,7 @@ module I18nContextGenerator
       end
 
       def translation_file?(file)
-        basename = File.basename(file).downcase
-        ext = File.extname(file).downcase
-
-        return true if ext == '.strings'
-        return true if basename == 'strings.xml'
-        return true if file.include?('/res/values') && ext == '.xml'
-
-        false
+        !FileClassifier.translation_platform(file).nil?
       end
     end
   end

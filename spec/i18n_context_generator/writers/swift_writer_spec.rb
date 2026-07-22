@@ -8,6 +8,18 @@ RSpec.describe I18nContextGenerator::Writers::SwiftWriter do
   end
 
   describe '#update_file' do
+    it 'updates a configured custom localization function' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Custom.swift')
+        File.write(path, 'let title = MyLocalizedString("custom.title", comment: "Old")')
+        writer = described_class.new(functions: ['MyLocalizedString('])
+
+        writer.update_file(path, 'custom.title' => build_result('custom.title', 'Custom screen title'))
+
+        expect(File.read(path)).to include('comment: "Context: Custom screen title"')
+      end
+    end
+
     it 'preserves the source file permissions' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'View.swift')

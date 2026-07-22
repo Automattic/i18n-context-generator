@@ -4,6 +4,7 @@ require 'open3'
 require 'pathname'
 require_relative 'translation_comment_index'
 require_relative 'xml_scanner'
+require_relative 'android_resource'
 
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
@@ -290,9 +291,9 @@ module I18nContextGenerator
     end
 
     def track_open_xml_resource(state, resource, content)
-      if resource[:type] == 'string'
+      if resource[:type] == :string
         state[:current_string] = resource[:name] unless content.include?('</string>')
-      elsif !content.include?("</#{resource[:type]}>")
+      elsif !content.include?("</#{AndroidResource.tag_for_type(resource[:type])}>")
         state[:current_parent] = resource[:name]
       end
     end
@@ -317,7 +318,7 @@ module I18nContextGenerator
       name_match = tag.match(/\bname\s*=\s*(["'])(.*?)\1/m)
       return unless type_match && name_match
 
-      { type: type_match[1], name: name_match[2] }
+      { type: AndroidResource.type_for_tag(type_match[1]), name: name_match[2] }
     end
 
     # Build a map of file line numbers to enclosing plural/array resource names,
@@ -325,31 +326,10 @@ module I18nContextGenerator
     def resolve_orphaned_items(keys, orphaned_lines, file_path, locations: nil)
       return if orphaned_lines.empty? || !File.exist?(file_path)
 
-      current_parent = nil
-      parent_at_line = {}
-      pending_tag = nil
-      comment_state = {}
-
-      File.readlines(file_path).each_with_index do |line, index|
-        line, = XmlScanner.without_comments(line, comment_state)
-        if pending_tag
-          pending_tag << line
-        elsif (tag_start = line.index(/<(?:plurals|string-array)\b/))
-          pending_tag = line[tag_start..]
-        end
-
-        if pending_tag&.include?('>')
-          resource = resource_from_opening_tag(pending_tag)
-          current_parent = resource[:name] if resource
-          pending_tag = nil
-        end
-
-        current_parent = nil if line.match?(%r{</(?:plurals|string-array)>})
-        parent_at_line[index + 1] = current_parent
-      end
+      resource_index = AndroidResource.index(File.read(file_path, encoding: 'UTF-8'))
 
       orphaned_lines.each do |line_num|
-        parent = parent_at_line[line_num]
+        parent = resource_index.base_key_at(line_num)
         next unless parent
 
         keys << parent

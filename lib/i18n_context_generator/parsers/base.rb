@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../file_classifier'
+
 module I18nContextGenerator
   module Parsers
     # Represents a single translation entry
@@ -12,7 +14,6 @@ module I18nContextGenerator
     # Base class for translation file parsers
     class Base
       def self.for(path, locale: nil)
-        basename = File.basename(path).downcase
         ext = File.extname(path).downcase
 
         case ext
@@ -24,7 +25,7 @@ module I18nContextGenerator
           StringsParser.new
         when '.xml'
           # Check if it's an Android strings.xml
-          raise Error, "Unsupported XML format: #{path} (only Android strings.xml is supported)" unless basename == 'strings.xml' || path.include?('/res/values')
+          raise Error, "Unsupported XML format: #{path} (only Android strings.xml is supported)" unless FileClassifier.android_translation_file?(path)
 
           AndroidXmlParser.new
 

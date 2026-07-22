@@ -4,45 +4,7 @@ module I18nContextGenerator
   class Searcher
     # Source-discovery helpers used for source-first extraction runs.
     module SourceDiscovery
-      IOS_SINGLE_LINE_DISCOVERY_PATTERNS = [
-        /NSLocalizedString\s*\(\s*@?["'](?<key>[^"']+)["'](?:.*?comment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["'])?/,
-        /String\s*\(\s*localized:\s*["'](?<key>[^"']+)["'](?:.*?comment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["'])?/,
-        /LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)/,
-        /:\s*LocalizedStringKey\s*=\s*["'](?<key>[^"']+)["']/,
-        /Text\s*\(\s*["'](?<key>[^"']+)["']/,
-        /["'](?<key>[^"']+)["']\.localized\b/
-      ].freeze
-
-      IOS_MULTILINE_DISCOVERY_PATTERNS = [
-        /NSLocalizedString\s*\(\s*@?["'](?<key>[^"']+)["'](?:(?:(?!\)\s*[),]?)[\s\S])*?comment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["'])?/,
-        /String\s*\(\s*localized:\s*["'](?<key>[^"']+)["'](?:(?:(?!\)\s*[),]?)[\s\S])*?comment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["'])?/,
-        /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)\s*\)/
-      ].freeze
-      IOS_LOCALIZATION_CALL_START_PATTERNS = [
-        /NSLocalizedString\s*\(/,
-        /String\s*\(\s*localized:/,
-        /String\s*\(\s*$/,
-        /Text\s*\(/
-      ].freeze
       IOS_COMMENT_ARGUMENT_PATTERN = /\bcomment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["']/
-
-      ANDROID_DISCOVERY_PATTERNS = {
-        string: %r{
-          R\.string\.(\w+)\b|
-          @string/([\w.]+)\b|
-          [(\s,=]string\.(\w+)\b
-        }x,
-        plural: %r{
-          R\.plurals\.(\w+)\b|
-          @plurals/([\w.]+)\b|
-          [(\s,=]plurals\.(\w+)\b
-        }x,
-        array: %r{
-          R\.array\.(\w+)\b|
-          @array/([\w.]+)\b|
-          [(\s,=]array\.(\w+)\b
-        }x
-      }.freeze
 
       def discover_localization_entries
         entries = discover_files.flat_map do |file|
@@ -100,14 +62,7 @@ module I18nContextGenerator
       end
 
       def platform_for_file(file)
-        case File.extname(file).downcase
-        when '.swift', '.m', '.mm', '.h'
-          :ios
-        when '.kt', '.java'
-          :android
-        when '.xml'
-          file.split(File::SEPARATOR).include?('res') ? :android : nil
-        end
+        FileClassifier.searchable_platform(file, platform_hint: @platform)
       end
 
       def discover_ios_entries(file)
@@ -126,7 +81,7 @@ module I18nContextGenerator
       end
 
       def extract_ios_entry(lines, file, index, line)
-        if IOS_LOCALIZATION_CALL_START_PATTERNS.any? { |pattern| pattern.match?(line) }
+        if @localization_syntax.ios_call_start_patterns.any? { |pattern| pattern.match?(line) }
           next_index, discovered_entry = extract_ios_multiline_entry(lines, file, index)
           return [next_index, discovered_entry] if discovered_entry
         end
@@ -135,13 +90,13 @@ module I18nContextGenerator
           return [index + 1, entry]
         end
 
-        return extract_ios_multiline_entry(lines, file, index) if IOS_FUNCTION_OPENERS.any? { |opener| opener.match?(line) }
+        return extract_ios_multiline_entry(lines, file, index) if @localization_syntax.ios_function_openers.any? { |opener| opener.match?(line) }
 
         [index + 1, nil]
       end
 
       def extract_ios_single_line_entry(file, index, line)
-        pattern = IOS_SINGLE_LINE_DISCOVERY_PATTERNS.find { |candidate| candidate.match?(line) }
+        pattern = @localization_syntax.ios_single_line_discovery_patterns.find { |candidate| candidate.match?(line) }
         return unless pattern
 
         build_ios_discovered_entry(file, index, pattern.match(line))
@@ -150,7 +105,7 @@ module I18nContextGenerator
       def extract_ios_multiline_entry(lines, file, start_index, lookahead: 8)
         end_index = ios_call_end_index(lines, start_index, lookahead: lookahead)
         snippet = lines[start_index..end_index].join("\n")
-        pattern = IOS_MULTILINE_DISCOVERY_PATTERNS.find { |candidate| candidate.match?(snippet) }
+        pattern = @localization_syntax.ios_multiline_discovery_patterns.find { |candidate| candidate.match?(snippet) }
         return [start_index + 1, nil] unless pattern
 
         match = pattern.match(snippet)
@@ -251,7 +206,7 @@ module I18nContextGenerator
       end
 
       def extract_android_entries_from_line(file, index, line)
-        ANDROID_DISCOVERY_PATTERNS.flat_map do |resource_type, pattern|
+        @localization_syntax.android_discovery_patterns.flat_map do |resource_type, pattern|
           line.scan(pattern).filter_map do |captures|
             key = captures.compact.first
             next if key.nil? || key.empty?

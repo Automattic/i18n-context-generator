@@ -499,7 +499,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           source_paths: [source_dir],
           ignore_patterns: config.ignore_patterns,
           context_lines: 15,
-          platform: :ios
+          platform: :ios,
+          swift_functions: config.swift_functions
         )
       end
     end

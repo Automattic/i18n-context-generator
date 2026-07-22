@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
-require 'find'
+require_relative '../path_policy'
+require_relative '../file_classifier'
 
 module I18nContextGenerator
   module Writers
@@ -26,47 +27,9 @@ module I18nContextGenerator
       end
 
       def find_swift_files(path, ignore_patterns: [])
-        compiled_patterns = ignore_patterns.map { |pattern| glob_to_regex(pattern) }
-        files = if File.file?(path) && path.end_with?('.swift')
-                  [path]
-                elsif File.directory?(path) && !ignored_path?(path, compiled_patterns, directory: true)
-                  find_swift_files_in_directory(path, compiled_patterns)
-                else
-                  []
-                end
-
-        files.reject { |file| ignored_path?(file, compiled_patterns) }.uniq.sort
-      end
-
-      private
-
-      def find_swift_files_in_directory(path, compiled_patterns)
-        files = []
-        Find.find(path) do |candidate|
-          if File.directory?(candidate)
-            next unless candidate != path && ignored_path?(candidate, compiled_patterns, directory: true)
-
-            Find.prune
-          end
-
-          files << candidate if candidate.end_with?('.swift')
-        end
-        files
-      end
-
-      def ignored_path?(path, compiled_patterns, directory: false)
-        candidates = [path]
-        candidates << "#{path}/" if directory && !path.end_with?('/')
-        compiled_patterns.any? { |pattern| candidates.any? { |candidate| pattern.match?(candidate) } }
-      end
-
-      def glob_to_regex(glob_pattern)
-        regex_str = Regexp.escape(glob_pattern)
-                          .gsub('\*\*/', '(.*/)?')
-                          .gsub('\*\*', '.*')
-                          .gsub('\*', '[^/]*')
-                          .gsub('\?', '.')
-        Regexp.new("(?:^|/)#{regex_str}(?:$|/)")
+        PathPolicy.new(ignore_patterns: ignore_patterns, roots: [path])
+                  .files([path]) { |file| FileClassifier.swift_source?(file) }
+                  .sort
       end
     end
   end

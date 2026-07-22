@@ -102,6 +102,21 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
+
+        it 'follows LocalizedStringKey wrapper constants to their usage' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'LocalizedWrapper.swift')
+            File.write(file, <<~SWIFT)
+              enum Copy {
+                static let title = LocalizedStringKey("wrapped.title")
+              }
+              Text(Copy.title)
+            SWIFT
+            wrapper_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :ios)
+
+            expect(wrapper_searcher.search('wrapped.title').map(&:line)).to contain_exactly(2, 4)
+          end
+        end
       end
 
       context 'with Text() pattern' do
@@ -240,6 +255,24 @@ RSpec.describe I18nContextGenerator::Searcher do
     end
 
     describe '#discover_localization_entries' do
+      it 'uses configured custom Swift functions for search and source discovery' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'CustomLocalization.swift')
+          File.write(file, 'let title = MyLocalizedString("custom.title", comment: "Custom screen title")')
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString(']
+          )
+
+          expect(custom_searcher.search('custom.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(key: 'custom.title', comment: 'Custom screen title')
+          )
+        end
+      end
+
       it 'discovers localized keys and comments directly from source files' do
         entries = searcher.discover_localization_entries
 
@@ -507,6 +540,22 @@ RSpec.describe I18nContextGenerator::Searcher do
               have_attributes(key: 'relative_res_title', file: 'res/layout/screen.xml')
             )
           end
+        end
+      end
+
+      it 'discovers references from the Android manifest when the platform is known' do
+        Dir.mktmpdir do |dir|
+          manifest = File.join(dir, 'AndroidManifest.xml')
+          File.write(manifest, '<application android:label="@string/application_name" />')
+          manifest_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: []
+          )
+
+          expect(manifest_searcher.search('application_name').map(&:file)).to eq([manifest])
+          expect(manifest_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(key: 'application_name', file: manifest)
+          )
         end
       end
 

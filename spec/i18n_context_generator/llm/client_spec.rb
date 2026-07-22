@@ -151,6 +151,11 @@ RSpec.describe I18nContextGenerator::LLM::Client do
 
       expect(described_class.for('openai')).to eq(openai_client)
     end
+
+    it 'reports unsupported providers through the same unknown-provider path' do
+      expect { described_class.for('ollama') }
+        .to raise_error(I18nContextGenerator::Error, 'Unknown LLM provider: ollama')
+    end
   end
 
   it 'parses markdown-wrapped JSON responses' do

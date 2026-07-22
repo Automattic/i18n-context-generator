@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../generated_comment'
+
 module I18nContextGenerator
   module Writers
     # Writer that updates iOS .strings files with context comments
@@ -52,16 +54,14 @@ module I18nContextGenerator
 
       def build_comment(existing_comment, context_description)
         context_line = sanitize_comment("#{@context_prefix}#{context_description}")
-
-        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
-          context_line
-        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
-          # Replace existing context line (idempotent update)
-          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/) { context_line }
-        else
-          # Append context to existing comment
-          "#{existing_comment}\n#{context_line}"
-        end
+        context_prefix = sanitize_comment(@context_prefix)
+        GeneratedComment.merge(
+          existing: existing_comment,
+          generated: context_line,
+          prefix: context_prefix,
+          mode: @context_mode,
+          separator: "\n"
+        )
       end
 
       def sanitize_comment(comment)

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'rexml/document'
+require_relative '../android_resource'
 
 module I18nContextGenerator
   module Parsers
@@ -11,6 +12,7 @@ module I18nContextGenerator
       def parse(path)
         content = File.read(path, encoding: 'UTF-8')
         doc = REXML::Document.new(content)
+        resource_index = AndroidResource.index(content)
         entries = []
 
         doc.elements.each('resources/string') do |element|
@@ -22,11 +24,12 @@ module I18nContextGenerator
           # Look for preceding comment
           comment = find_preceding_comment(element)
 
-          entries << TranslationEntry.new(
+          entries << build_entry(
             key: key,
             text: unescape_android_string(text),
             source_file: path,
-            metadata: { comment: comment }
+            metadata: { comment: comment, resource_type: :string },
+            resource_index: resource_index
           )
         end
 
@@ -36,11 +39,13 @@ module I18nContextGenerator
 
           array_name = array_element.attributes['name']
           array_element.elements.to_a('item').each_with_index do |item, index|
-            entries << TranslationEntry.new(
-              key: "#{array_name}[#{index}]",
+            key = AndroidResource.composite_key(array_name, type: :array, index: index)
+            entries << build_entry(
+              key: key,
               text: unescape_android_string(inner_text(item)),
               source_file: path,
-              metadata: { array: array_name, index: index }
+              metadata: { array: array_name, index: index, resource_type: :array },
+              resource_index: resource_index
             )
           end
         end
@@ -52,11 +57,13 @@ module I18nContextGenerator
           plural_name = plural_element.attributes['name']
           plural_element.elements.each('item') do |item|
             quantity = item.attributes['quantity']
-            entries << TranslationEntry.new(
-              key: "#{plural_name}:#{quantity}",
+            key = AndroidResource.composite_key(plural_name, type: :plural, quantity: quantity)
+            entries << build_entry(
+              key: key,
               text: unescape_android_string(inner_text(item)),
               source_file: path,
-              metadata: { plural: plural_name, quantity: quantity }
+              metadata: { plural: plural_name, quantity: quantity, resource_type: :plural },
+              resource_index: resource_index
             )
           end
         end
@@ -67,6 +74,17 @@ module I18nContextGenerator
       end
 
       private
+
+      def build_entry(key:, text:, source_file:, metadata:, resource_index:)
+        span = resource_index.span_for(key)
+        if span
+          metadata = metadata.merge(
+            line_span: span.line_span,
+            resource_line_span: span.parent_line_span
+          )
+        end
+        TranslationEntry.new(key: key, text: text, source_file: source_file, metadata: metadata)
+      end
 
       # Get the full inner content of an element, including inline markup like
       # <b>, <i>, <u>, <xliff:g>. REXML::Element#text only returns the first

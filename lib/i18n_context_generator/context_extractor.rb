@@ -119,7 +119,8 @@ module I18nContextGenerator
         source_paths: @config.source_paths,
         ignore_patterns: @config.ignore_patterns,
         context_lines: @config.context_lines,
-        platform: @platform
+        platform: @platform,
+        swift_functions: @config.swift_functions
       )
     end
 
@@ -413,7 +414,6 @@ module I18nContextGenerator
     end
 
     def source_writer_for(path)
-      basename = File.basename(path).downcase
       ext = File.extname(path).downcase
 
       case ext
@@ -423,7 +423,7 @@ module I18nContextGenerator
           context_mode: @config.context_mode
         )
       when '.xml'
-        if basename == 'strings.xml' || path.include?('/res/values')
+        if FileClassifier.android_translation_file?(path)
           Writers::AndroidXmlWriter.new(
             context_prefix: @config.context_prefix,
             context_mode: @config.context_mode

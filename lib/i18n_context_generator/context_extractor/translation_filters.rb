@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'pathname'
-require_relative '../xml_scanner'
+require_relative '../android_resource'
 
 module I18nContextGenerator
   class ContextExtractor
@@ -22,7 +22,7 @@ module I18nContextGenerator
 
       # Extract the base resource name from composite Android keys.
       def android_base_key(key)
-        key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
+        AndroidResource.base_key(key)
       end
 
       def translation_key_for(entry)
@@ -43,12 +43,13 @@ module I18nContextGenerator
         metadata = entry.metadata || {}
         return locations unless metadata[:plural] || metadata[:array]
 
-        members_by_location = locations.to_h do |location|
-          [location, android_collection_member_at(location, translation_key_for(entry))]
-        end
-        return locations if members_by_location.values.compact.empty?
+        locations.select do |location|
+          line_number = location.rpartition(':').last.to_i
+          next true if metadata[:line_span]&.cover?(line_number)
 
-        locations.select { |location| members_by_location[location] == entry.key }
+          member = android_collection_member_at(location, translation_key_for(entry))
+          member.nil? || member == entry.key
+        end
       end
 
       def android_collection_member_at(location, expected_parent)
@@ -67,87 +68,8 @@ module I18nContextGenerator
       end
 
       def scan_android_collection_members(file, target_line, expected_parent)
-        state = android_collection_scan_state
-
-        File.foreach(file).with_index(1) do |line, line_number|
-          line, = XmlScanner.without_comments(line, state[:xml_comment_state])
-          track_android_collection_parent(state, line)
-          item_count = line.scan(/<item\b/).size
-          track_android_collection_item(state, line)
-          advance_android_array_for_additional_items(state, item_count)
-          member = state[:member] if state[:parent_name] == expected_parent && item_count <= 1
-          return member if line_number == target_line
-
-          close_android_collection_elements(state, line)
-        end
-        nil
-      end
-
-      def android_collection_scan_state
-        {
-          parent_name: nil,
-          parent_type: nil,
-          array_index: -1,
-          member: nil,
-          pending_parent: nil,
-          pending_item: nil,
-          xml_comment_state: {}
-        }
-      end
-
-      def track_android_collection_parent(state, line)
-        if state[:pending_parent]
-          state[:pending_parent] << line
-        elsif (tag_start = line.index(/<(?:plurals|string-array)\b/))
-          state[:pending_parent] = line[tag_start..]
-        end
-        return unless state[:pending_parent]&.include?('>')
-
-        tag = state[:pending_parent]
-        type = tag[/<(plurals|string-array)\b/, 1]
-        name = tag[/\bname\s*=\s*(["'])(.*?)\1/m, 2]
-        if type && name
-          state[:parent_type] = type
-          state[:parent_name] = name
-          state[:array_index] = -1
-        end
-        state[:pending_parent] = nil
-      end
-
-      def track_android_collection_item(state, line)
-        return unless state[:parent_name]
-
-        if state[:pending_item]
-          state[:pending_item] << line
-        elsif (tag_start = line.index(/<item\b/))
-          state[:pending_item] = line[tag_start..]
-        end
-        return unless state[:pending_item]&.include?('>')
-
-        tag = state[:pending_item]
-        if state[:parent_type] == 'plurals'
-          quantity = tag[/\bquantity\s*=\s*(["'])(.*?)\1/m, 2]
-          state[:member] = "#{state[:parent_name]}:#{quantity}" if quantity
-        else
-          state[:array_index] += 1
-          state[:member] = "#{state[:parent_name]}[#{state[:array_index]}]"
-        end
-        state[:pending_item] = nil
-      end
-
-      def advance_android_array_for_additional_items(state, item_count)
-        return unless state[:parent_type] == 'string-array' && item_count > 1
-
-        state[:array_index] += item_count - 1
-      end
-
-      def close_android_collection_elements(state, line)
-        state[:member] = nil if line.include?('</item>') || line.match?(%r{<item\b[^>]*/>})
-        return unless line.match?(%r{</(?:plurals|string-array)>})
-
-        state[:parent_name] = nil
-        state[:parent_type] = nil
-        state[:member] = nil
+        content = File.read(file, encoding: 'UTF-8')
+        AndroidResource.index(content).member_at(target_line, parent: expected_parent)
       end
 
       def git_diff
