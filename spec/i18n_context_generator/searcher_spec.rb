@@ -268,6 +268,29 @@ RSpec.describe I18nContextGenerator::Searcher do
           )
         )
       end
+
+      it 'ignores localization calls in Swift comments' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'CommentedExamples.swift')
+          File.write(file, <<~SWIFT)
+            // Text("commented.single")
+            /*
+             Text("commented.block")
+            */
+            let url = "https://example.com/path"
+            Text("live.key") // Text("commented.trailing")
+          SWIFT
+          comment_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :ios)
+
+          entries = comment_searcher.discover_localization_entries
+
+          expect(entries.map(&:key)).to eq(['live.key'])
+          expect(comment_searcher.search('commented.single')).to be_empty
+          expect(comment_searcher.search('commented.block')).to be_empty
+          expect(comment_searcher.search('commented.trailing')).to be_empty
+          expect(comment_searcher.search('live.key')).not_to be_empty
+        end
+      end
     end
   end
 
@@ -367,9 +390,55 @@ RSpec.describe I18nContextGenerator::Searcher do
 
         settings_title = entries.find { |entry| entry.key == 'settings_title' }
         xml_title = entries.find { |entry| entry.key == 'xml_toolbar_title' }
+        likes_plural = entries.find { |entry| entry.key == 'post_likes_count' }
 
         expect(settings_title).not_to be_nil
         expect(xml_title).not_to be_nil
+        expect(likes_plural).to have_attributes(resource_type: :plural)
+        expect(entries.map(&:key)).not_to include('key_name')
+      end
+
+      it 'discovers and searches Android array references' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'Arrays.kt')
+          File.write(file, <<~KOTLIN)
+            val days = resources.getStringArray(R.array.days_of_week)
+          KOTLIN
+          array_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :android)
+
+          entry = array_searcher.discover_localization_entries.find { |candidate| candidate.key == 'days_of_week' }
+          matches = array_searcher.search('days_of_week', resource_type: :array)
+
+          expect(entry).to have_attributes(resource_type: :array)
+          expect(matches.map(&:line)).to eq([1])
+        end
+      end
+
+      it 'ignores localization references in Kotlin and XML comments' do
+        Dir.mktmpdir do |dir|
+          kotlin_file = File.join(dir, 'Screen.kt')
+          xml_dir = File.join(dir, 'res', 'layout')
+          xml_file = File.join(xml_dir, 'screen.xml')
+          FileUtils.mkdir_p(xml_dir)
+          File.write(kotlin_file, <<~KOTLIN)
+            // val ignored = R.string.commented_kotlin
+            val title = R.string.live_kotlin // R.string.trailing_kotlin
+          KOTLIN
+          File.write(xml_file, <<~XML)
+            <LinearLayout>
+              <!-- android:text="@string/commented_xml" -->
+              <TextView android:text="@string/live_xml" />
+            </LinearLayout>
+          XML
+          comment_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :android)
+
+          keys = comment_searcher.discover_localization_entries.map(&:key)
+
+          expect(keys).to contain_exactly('live_kotlin', 'live_xml')
+          expect(comment_searcher.search('commented_kotlin')).to be_empty
+          expect(comment_searcher.search('trailing_kotlin')).to be_empty
+          expect(comment_searcher.search('commented_xml')).to be_empty
+        end
       end
     end
   end
@@ -479,6 +548,28 @@ RSpec.describe I18nContextGenerator::Searcher do
 
       # Should detect the enclosing function or class
       expect(match.enclosing_scope).not_to be_nil
+    end
+  end
+
+  describe 'source file caching' do
+    it 'reads each source file once across repeated searches and discovery' do
+      Dir.mktmpdir do |dir|
+        file = File.join(dir, 'Cached.swift')
+        File.write(file, <<~SWIFT)
+          Text("first.key")
+          Text("second.key")
+        SWIFT
+        caching_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :ios)
+        allow(File).to receive(:readlines).and_call_original
+
+        threads = %w[first.key second.key].cycle.take(10).map do |key|
+          Thread.new { caching_searcher.search(key) }
+        end
+        threads.each(&:join)
+        caching_searcher.discover_localization_entries
+
+        expect(File).to have_received(:readlines).with(file, chomp: true).once
+      end
     end
   end
 end

@@ -35,6 +35,15 @@ RSpec.describe I18nContextGenerator::Cache do
       expect(cache.get('key', 'text_v1')[:description]).to eq('version 1')
       expect(cache.get('key', 'text_v2')[:description]).to eq('version 2')
     end
+
+    it 'does not persist errored results' do
+      cache = described_class.new(enabled: true)
+
+      cache.set('key', 'text', { description: 'API request failed', error: 'timeout' })
+
+      expect(cache.get('key', 'text')).to be_nil
+      expect(Dir.glob(File.join(cache_dir, '*.json'))).to be_empty
+    end
   end
 
   describe 'context-based invalidation' do

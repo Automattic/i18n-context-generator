@@ -173,12 +173,24 @@ module I18nContextGenerator
 
         # Try to extract JSON from the response
         json_text = extract_json(text)
-        return ContextResult.new(description: text.strip, error: nil) unless json_text
+        unless json_text
+          return ContextResult.new(
+            description: 'Failed to parse response',
+            error: 'Response did not contain a valid JSON object'
+          )
+        end
 
         data = JSON.parse(json_text, symbolize_names: true)
+        description = data[:description]
+        unless description.is_a?(String) && !description.strip.empty?
+          return ContextResult.new(
+            description: 'Failed to parse response',
+            error: 'Response JSON did not contain a description'
+          )
+        end
 
         ContextResult.new(
-          description: data[:description] || 'No description provided',
+          description: description,
           ui_element: data[:ui_element],
           tone: data[:tone],
           max_length: data[:max_length]

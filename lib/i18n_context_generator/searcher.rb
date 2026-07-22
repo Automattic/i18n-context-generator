@@ -1,11 +1,13 @@
 # frozen_string_literal: true
 
 require 'find'
+require_relative 'searcher/comment_masking'
 require_relative 'searcher/source_discovery'
 
 module I18nContextGenerator
   # Finds where translation keys are used in iOS and Android source code.
   class Searcher
+    include CommentMasking
     include SourceDiscovery
 
     # Represents a code match with surrounding context
@@ -16,8 +18,8 @@ module I18nContextGenerator
     end
 
     # Represents a localization entry discovered directly from source code.
-    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment) do
-      def initialize(key:, file:, line:, text: nil, comment: nil)
+    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment, :resource_type) do
+      def initialize(key:, file:, line:, text: nil, comment: nil, resource_type: :string)
         super
       end
     end
@@ -51,11 +53,13 @@ module I18nContextGenerator
 
       # Cache discovered files for repeated searches
       @files_cache = nil
-      @file_lines_cache = {}
+      @files_cache_mutex = Mutex.new
+      @file_lines_cache = Concurrent::Map.new
+      @searchable_file_lines_cache = Concurrent::Map.new
     end
 
-    def search(key)
-      patterns = build_search_patterns(key)
+    def search(key, resource_type: nil)
+      patterns = build_search_patterns(key, resource_type: resource_type)
       files = discover_files
       direct_matches = []
 
@@ -119,21 +123,25 @@ module I18nContextGenerator
     def discover_files
       return @files_cache if @files_cache
 
-      extensions = FILE_EXTENSIONS[@platform] || FILE_EXTENSIONS[:unknown]
-      files = []
+      @files_cache_mutex.synchronize do
+        return @files_cache if @files_cache
 
-      @source_paths.each do |path|
-        if File.file?(path)
-          files << path if extensions.any? { |ext| path.end_with?(ext) }
-        elsif File.directory?(path)
-          # Build a single glob pattern for all extensions
-          ext_pattern = extensions.size == 1 ? "*#{extensions.first}" : "*{#{extensions.join(',')}}"
-          files.concat(Dir.glob(File.join(path, '**', ext_pattern)))
+        extensions = FILE_EXTENSIONS[@platform] || FILE_EXTENSIONS[:unknown]
+        files = []
+
+        @source_paths.each do |path|
+          if File.file?(path)
+            files << path if extensions.any? { |ext| path.end_with?(ext) }
+          elsif File.directory?(path)
+            # Build a single glob pattern for all extensions
+            ext_pattern = extensions.size == 1 ? "*#{extensions.first}" : "*{#{extensions.join(',')}}"
+            files.concat(Dir.glob(File.join(path, '**', ext_pattern)))
+          end
         end
-      end
 
-      # Apply ignore patterns and cache
-      @files_cache = files.reject { |f| ignored?(f) }
+        # Apply ignore patterns and cache
+        @files_cache = files.reject { |f| ignored?(f) }
+      end
     end
 
     def ignored?(file)
@@ -142,14 +150,13 @@ module I18nContextGenerator
 
     def search_file(file, patterns, key, enable_multiline: true)
       matches = []
-      lines = []
+      lines = cached_file_lines(file)
+      searchable_lines = searchable_file_lines(file)
       match_indices = Set.new
 
-      # Read file and find all matching line indices in a single pass
-      File.foreach(file).with_index do |line, index|
-        line = line.chomp
-        lines << line
-
+      # Find matching line indices using the comment-masked source while
+      # retaining the original lines for prompt context and output.
+      searchable_lines.each_with_index do |line, index|
         # Check if any pattern matches this line
         match_indices << index if patterns.any? { |pattern| pattern.match?(line) }
       end
@@ -157,7 +164,7 @@ module I18nContextGenerator
       # For iOS files, also check for multi-line NSLocalizedString patterns
       # where the function call and key are on different lines
       if enable_multiline && @platform == :ios && file.end_with?('.swift', '.m', '.mm', '.h')
-        multiline_matches = find_multiline_ios_matches(lines, patterns, key)
+        multiline_matches = find_multiline_ios_matches(searchable_lines, patterns, key)
         match_indices.merge(multiline_matches)
       end
 
@@ -240,7 +247,13 @@ module I18nContextGenerator
     end
 
     def cached_file_lines(file)
-      @file_lines_cache[file] ||= File.readlines(file, chomp: true)
+      @file_lines_cache.compute_if_absent(file) { File.readlines(file, chomp: true) }
+    end
+
+    def searchable_file_lines(file)
+      @searchable_file_lines_cache.compute_if_absent(file) do
+        mask_comments(cached_file_lines(file), file)
+      end
     end
 
     def find_ios_wrapper_definition_index(lines, match_index, lookback: 5)
@@ -336,14 +349,14 @@ module I18nContextGenerator
       context_parts.join("\n")
     end
 
-    def build_search_patterns(key)
+    def build_search_patterns(key, resource_type: nil)
       pattern_strings = case @platform
                         when :ios
                           build_ios_patterns(key)
                         when :android
-                          build_android_patterns(key)
+                          build_android_patterns(key, resource_type: resource_type)
                         else
-                          build_ios_patterns(key) + build_android_patterns(key) + [Regexp.escape(key)]
+                          build_ios_patterns(key) + build_android_patterns(key, resource_type: resource_type) + [Regexp.escape(key)]
                         end
 
       # Pre-compile all patterns for this search
@@ -386,11 +399,11 @@ module I18nContextGenerator
       ]
     end
 
-    def build_android_patterns(key)
+    def build_android_patterns(key, resource_type: nil)
       base = android_base_key(key)
       escaped_base = Regexp.escape(base)
 
-      if key =~ /:[a-z]+$/
+      if resource_type.to_s == 'plural' || key =~ /:[a-z]+$/
         # Plural key (e.g., "post_likes_count:one") — search by base name in plural resources
         [
           "R\\.plurals\\.#{escaped_base}\\b",
@@ -400,7 +413,7 @@ module I18nContextGenerator
           "pluralStringResource\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
           "[\\(\\s,=]plurals\\.#{escaped_base}\\b"
         ]
-      elsif key =~ /\[\d+\]$/
+      elsif resource_type.to_s == 'array' || key =~ /\[\d+\]$/
         # Array key (e.g., "days_of_week[0]") — search by base name in array resources
         [
           "R\\.array\\.#{escaped_base}\\b",
