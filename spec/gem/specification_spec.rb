@@ -18,4 +18,12 @@ RSpec.describe Gem::Specification do
     expect(csv_dependency).not_to be_nil
     expect(csv_dependency.requirement).to be_satisfied_by(Gem::Version.new(CSV::VERSION))
   end
+
+  it 'bounds every development dependency' do
+    unbounded = specification.development_dependencies.select do |dependency|
+      dependency.requirement == Gem::Requirement.default
+    end
+
+    expect(unbounded).to be_empty
+  end
 end

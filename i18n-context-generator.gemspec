@@ -27,6 +27,6 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'tty-progressbar', '~> 0.18'
 
   spec.add_development_dependency 'rspec', '~> 3.13'
-  spec.add_development_dependency 'rubocop-rake'
-  spec.add_development_dependency 'rubocop-rspec'
+  spec.add_development_dependency 'rubocop-rake', '~> 0.7'
+  spec.add_development_dependency 'rubocop-rspec', '~> 3.9'
 end
