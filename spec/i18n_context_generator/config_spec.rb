@@ -23,6 +23,8 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.include_translation_comments).to be true
       expect(config.redact_prompts).to be true
       expect(config.discovery_mode).to eq('auto')
+      expect(config.platform).to be_nil
+      expect(config.translation_locales).to eq({})
       expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
     end
 
@@ -180,14 +182,58 @@ RSpec.describe I18nContextGenerator::Config do
     it 'handles translations as hash with path key' do
       yaml_with_hash = <<~YAML
         translations:
-          - path: Localizable.strings
-            format: strings
+          - path: translations.yml
+            locale: en
       YAML
 
       File.write(config_path, yaml_with_hash)
       config = described_class.from_file(config_path)
 
-      expect(config.translations).to eq(['Localizable.strings'])
+      expect(config.translations).to eq(['translations.yml'])
+      expect(config.translation_locales).to eq('translations.yml' => 'en')
+    end
+
+    it 'infers output format from the configured output path when format is omitted' do
+      File.write(config_path, "output:\n  path: context.json\n")
+
+      expect(described_class.from_file(config_path).output_format).to eq('json')
+    end
+
+    it 'rejects conflicting locale declarations for one translation file' do
+      File.write(config_path, <<~YAML)
+        translations:
+          - path: translations.yml
+            locale: en
+          - path: translations.yml
+            locale: fr
+      YAML
+
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /Conflicting translation locales/)
+    end
+
+    it 'wraps malformed YAML and invalid section shapes in configuration errors' do
+      File.write(config_path, "source:\n  paths: [\n")
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /Invalid config YAML.*line/)
+
+      File.write(config_path, "source: Sources\n")
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /source must be a mapping/)
+    end
+
+    it 'rejects a non-mapping document root' do
+      File.write(config_path, "- invalid\n- root\n")
+
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /root must be a mapping/)
+    end
+  end
+
+  describe '.load' do
+    it 'reports a configured file that does not exist' do
+      expect { described_class.load(config: '/missing/i18n.yml') }
+        .to raise_error(I18nContextGenerator::Error, /Config file not found/)
     end
   end
 
@@ -244,6 +290,12 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.no_cache).to be true
       expect(config.dry_run).to be false
     end
+
+    it 'infers JSON output from its extension when format is omitted' do
+      config = described_class.from_cli(output: 'translation-context.json')
+
+      expect(config.output_format).to eq('json')
+    end
   end
 
   describe '#merge_cli' do
@@ -286,6 +338,25 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.dry_run).to be false
       expect(config.write_back).to be false
       expect(config.redact_prompts).to be false
+    end
+
+    it 'clears an inherited model when the provider changes without a model override' do
+      config = described_class.new(provider: 'anthropic', model: 'claude-sonnet-4-6')
+
+      config.merge_cli(provider: 'openai')
+
+      expect(config.provider).to eq('openai')
+      expect(config.model).to be_nil
+    end
+
+    it 'keeps or explicitly replaces the model when the provider is compatible' do
+      config = described_class.new(provider: 'anthropic', model: 'claude-sonnet-4-6')
+
+      config.merge_cli(provider: 'anthropic')
+      expect(config.model).to eq('claude-sonnet-4-6')
+
+      config.merge_cli(provider: 'openai', model: 'gpt-5-mini')
+      expect(config.model).to eq('gpt-5-mini')
     end
   end
 
@@ -339,6 +410,128 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect { config.validate! }
         .to raise_error(I18nContextGenerator::Error, /provider.*output_format.*context_mode.*discovery_mode/)
+    end
+
+    it 'rejects malformed collection and scalar types' do
+      config = described_class.new(
+        translations: 'Localizable.strings',
+        source_paths: [],
+        ignore_patterns: 'build',
+        dry_run: 'yes',
+        model: 123,
+        context_prefix: nil
+      )
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /translations.*source_paths.*ignore_patterns.*dry_run.*model/)
+    end
+
+    it 'rejects blank optional strings' do
+      config = described_class.new(output_path: ' ', diff_base: '')
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /output_path must be a non-empty string.*diff_base/)
+    end
+
+    it 'rejects missing translation and source paths' do
+      config = described_class.new(
+        translations: ['/missing/Localizable.strings'],
+        source_paths: ['/missing/Sources']
+      )
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /translation file not found.*source path not found/)
+    end
+
+    it 'infers output format and rejects explicit extension mismatches' do
+      expect(described_class.new(output_path: 'context.json').validate!.output_format).to eq('json')
+
+      config = described_class.new(output_path: 'context.json', output_format: 'csv')
+      expect { config.validate! }.to raise_error(I18nContextGenerator::Error, /does not match .json path/)
+    end
+
+    it 'rejects missing output directories and unsupported output extensions' do
+      config = described_class.new(output_path: '/missing/context.txt')
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /extension must be .csv or .json.*output directory not found/)
+    end
+
+    it 'rejects a directory used as the output file' do
+      Dir.mktmpdir do |dir|
+        output_directory = File.join(dir, 'context.csv')
+        FileUtils.mkdir_p(output_directory)
+
+        expect { described_class.new(output_path: output_directory).validate! }
+          .to raise_error(I18nContextGenerator::Error, /output path is a directory/)
+      end
+    end
+
+    it 'rejects unsupported translation diff formats but allows source-mode hydration' do
+      Dir.mktmpdir do |dir|
+        json_path = File.join(dir, 'translations.json')
+        File.write(json_path, '{}')
+
+        translation_config = described_class.new(translations: [json_path], diff_base: 'main')
+        expect { translation_config.validate! }
+          .to raise_error(I18nContextGenerator::Error, /diff_base is not supported/)
+
+        source_config = described_class.new(
+          translations: [json_path],
+          source_paths: [dir],
+          discovery_mode: 'source',
+          diff_base: 'main'
+        )
+        expect { source_config.validate! }.not_to raise_error
+      end
+    end
+
+    it 'rejects unsupported translation write-back formats' do
+      Dir.mktmpdir do |dir|
+        json_path = File.join(dir, 'translations.json')
+        File.write(json_path, '{}')
+        config = described_class.new(translations: [json_path], write_back: true)
+
+        expect { config.validate! }.to raise_error(I18nContextGenerator::Error, /write_back is not supported/)
+      end
+    end
+
+    it 'requires write-back inputs and limits locale roots to configured YAML files' do
+      empty_write_back = described_class.new(translations: [], write_back: true)
+      expect { empty_write_back.validate! }
+        .to raise_error(I18nContextGenerator::Error, /write_back requires at least one translation file/)
+
+      Dir.mktmpdir do |dir|
+        json_path = File.join(dir, 'translations.json')
+        yaml_path = File.join(dir, 'translations.yml')
+        File.write(json_path, '{}')
+        File.write(yaml_path, '{}')
+
+        wrong_format = described_class.new(
+          translations: [json_path],
+          translation_locales: { json_path => 'en' }
+        )
+        expect { wrong_format.validate! }
+          .to raise_error(I18nContextGenerator::Error, /translation locale is supported only for YAML files/)
+
+        unconfigured = described_class.new(
+          translations: [yaml_path],
+          translation_locales: { File.join(dir, 'other.yml') => 'en' }
+        )
+        expect { unconfigured.validate! }
+          .to raise_error(I18nContextGenerator::Error, /translation locale references an unconfigured file/)
+      end
+    end
+
+    it 'deduplicates repeated and overlapping source paths' do
+      Dir.mktmpdir do |dir|
+        nested = File.join(dir, 'Sources')
+        FileUtils.mkdir_p(nested)
+
+        config = described_class.new(source_paths: [nested, dir, File.join(dir, '.')])
+
+        expect(config.source_paths).to eq([dir])
+      end
     end
   end
 

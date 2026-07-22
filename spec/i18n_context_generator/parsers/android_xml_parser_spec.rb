@@ -60,6 +60,16 @@ RSpec.describe I18nContextGenerator::Parsers::AndroidXmlParser do
         expect(entry.source_file).to eq(strings_xml)
       end
     end
+
+    it 'wraps malformed XML in an actionable error' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, '<resources><string name="broken"></resources>')
+
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /Failed to parse Android XML translation file.*strings\.xml/)
+      end
+    end
   end
 
   describe 'plurals parsing' do

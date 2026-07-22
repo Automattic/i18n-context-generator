@@ -31,13 +31,15 @@ module I18nContextGenerator
     option :config, aliases: '-c', desc: 'Path to config file (.i18n-context-generator.yml)'
     option :translations, aliases: '-t', desc: 'Translation file(s), comma-separated'
     option :source, aliases: '-s', desc: 'Source directory(ies) to search, comma-separated'
-    option :output, aliases: '-o', desc: 'Output file path (CSV written only if specified)'
-    option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (default: csv)'
+    option :output, aliases: '-o', desc: 'Output file path (.csv or .json; format inferred when omitted)'
+    option :format, aliases: '-f', enum: %w[csv json], desc: 'Output format (inferred from output path, default: csv)'
     option :provider, aliases: '-p', enum: %w[anthropic openai], desc: 'LLM provider (default: anthropic)'
     option :model, aliases: '-m', desc: 'LLM model to use'
     option :keys, aliases: '-k', desc: 'Filter keys (comma-separated patterns, supports * wildcard)'
     option :discovery_mode, type: :string, enum: %w[auto translations source],
                             desc: 'How to discover entries: auto, translations, or source (default: auto)'
+    option :platform, type: :string, enum: %w[ios android],
+                      desc: 'Explicit platform override: ios or android'
     option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
     option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
     option :cache, type: :boolean, desc: 'Enable caching of LLM results'
@@ -102,7 +104,7 @@ module I18nContextGenerator
     private
 
     def validate_options!
-      return if options[:config] && File.exist?(options[:config])
+      return if options[:config]
 
       return if options[:translations]
       return if options[:discovery_mode] == 'source' && options[:source]
@@ -174,6 +176,10 @@ module I18nContextGenerator
           # Android example
           # - path: android/app/src/main/res/values/strings.xml
 
+          # YAML example with an explicit locale root
+          # - path: config/translations.yml
+          #   locale: en
+
         # Source code directories to search
         source:
           paths:
@@ -192,6 +198,8 @@ module I18nContextGenerator
 
         # Processing options
         processing:
+          # Optional explicit platform override: ios or android
+          # platform: ios
           # Discovery mode: auto, translations, or source
           discovery_mode: auto
           concurrency: 5

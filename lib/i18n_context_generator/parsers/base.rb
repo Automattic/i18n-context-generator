@@ -11,7 +11,7 @@ module I18nContextGenerator
 
     # Base class for translation file parsers
     class Base
-      def self.for(path)
+      def self.for(path, locale: nil)
         basename = File.basename(path).downcase
         ext = File.extname(path).downcase
 
@@ -19,7 +19,7 @@ module I18nContextGenerator
         when '.json'
           JsonParser.new
         when '.yml', '.yaml'
-          YamlParser.new
+          YamlParser.new(locale: locale)
         when '.strings'
           StringsParser.new
         when '.xml'

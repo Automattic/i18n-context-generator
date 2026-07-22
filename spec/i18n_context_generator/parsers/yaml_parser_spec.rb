@@ -43,6 +43,56 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
 
         expect(entries.map(&:key)).to eq(['errors.network'])
         expect(entries.first.text).to eq('Offline')
+
+        File.write(path, "app:\n  title: Example\n")
+        app_entries = parser.parse(path)
+        expect(app_entries.map(&:key)).to eq(['app.title'])
+      end
+    end
+
+    it 'supports an explicit locale root without guessing from the namespace' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.yml')
+        File.write(path, "application:\n  title: My app\n")
+
+        entries = described_class.new(locale: 'application').parse(path)
+
+        expect(entries.map(&:key)).to eq(['title'])
+      end
+    end
+
+    it 'recognizes common BCP-47 locale roots' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.yml')
+        File.write(path, "zh-Hant-TW:\n  title: Settings\n")
+
+        entries = parser.parse(path)
+
+        expect(entries.map(&:key)).to eq(['title'])
+      end
+    end
+
+    it 'wraps malformed YAML and rejects non-mapping roots' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.yml')
+        File.write(path, "broken: [\n")
+
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /Failed to parse YAML translation file.*line/)
+
+        File.write(path, "- not\n- a mapping\n")
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /root must be a mapping/)
+      end
+    end
+
+    it 'fails clearly when an explicit locale root is missing' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.yml')
+        File.write(path, "fr:\n  title: Réglages\n")
+
+        expect { described_class.new(locale: 'en').parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /does not contain locale root "en"/)
       end
     end
   end

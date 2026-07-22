@@ -122,6 +122,8 @@ RSpec.describe I18nContextGenerator::CLI do
 
       expect(sample).to include('extend the built-in dependency, build, and test ignores')
       expect(sample).to include('- "**/*.generated.*"')
+      expect(sample).to include('# - path: config/translations.yml', '#   locale: en')
+      expect(sample).to include('# platform: ios')
       expect(sample).not_to include('- "**/Pods/**"', '- "**/build/**"', '- "**/*Tests*"')
     end
   end
@@ -156,63 +158,69 @@ RSpec.describe I18nContextGenerator::CLI do
     end
 
     it 'exits non-zero when extraction completes with errors' do
-      config = I18nContextGenerator::Config.new(
-        translations: ['Localizable.strings'],
-        output_path: 'context.csv',
-        dry_run: false
-      )
-      errored_result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
-        key: 'settings.title',
-        text: 'Settings',
-        description: 'API request failed',
-        error: 'timeout'
-      )
-      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [errored_result])
+      Dir.mktmpdir do |dir|
+        translation_path = File.join(dir, 'Localizable.strings')
+        File.write(translation_path, '"settings.title" = "Settings";')
+        config = I18nContextGenerator::Config.new(
+          translations: [translation_path],
+          output_path: 'context.csv',
+          dry_run: false
+        )
+        errored_result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+          key: 'settings.title',
+          text: 'Settings',
+          description: 'API request failed',
+          error: 'timeout'
+        )
+        extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [errored_result])
 
-      allow(cli).to receive(:options).and_return(
-        config: nil,
-        translations: 'Localizable.strings',
-        provider: 'anthropic',
-        dry_run: false,
-        diff_base: nil
-      )
-      allow(cli).to receive(:say_error)
-      allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
-      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
-      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+        allow(cli).to receive(:options).and_return(
+          config: nil,
+          translations: translation_path,
+          provider: 'anthropic',
+          dry_run: false,
+          diff_base: nil
+        )
+        allow(cli).to receive(:say_error)
+        allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
+        allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+        allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
 
-      with_env('ANTHROPIC_API_KEY', 'test-anthropic-key') do
-        expect { cli.extract }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+        with_env('ANTHROPIC_API_KEY', 'test-anthropic-key') do
+          expect { cli.extract }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+        end
+
+        expect(cli).to have_received(:say_error).with('Completed with 1 extraction error(s).')
       end
-
-      expect(cli).to have_received(:say_error).with('Completed with 1 extraction error(s).')
     end
 
     it 'validates diff-base in source mode' do
-      config = I18nContextGenerator::Config.new(
-        translations: [],
-        source_paths: ['./Sources'],
-        discovery_mode: 'source',
-        diff_base: 'origin/main',
-        dry_run: true
-      )
-      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+      Dir.mktmpdir do |source_dir|
+        config = I18nContextGenerator::Config.new(
+          translations: [],
+          source_paths: [source_dir],
+          discovery_mode: 'source',
+          diff_base: 'origin/main',
+          dry_run: true
+        )
+        extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
 
-      allow(cli).to receive(:options).and_return(
-        config: nil,
-        translations: nil,
-        discovery_mode: 'source',
-        source: './Sources',
-        provider: 'anthropic',
-        dry_run: true,
-        diff_base: 'origin/main'
-      )
-      allow(cli).to receive(:validate_diff_base!)
-      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
-      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+        allow(cli).to receive(:options).and_return(
+          config: nil,
+          translations: nil,
+          discovery_mode: 'source',
+          source: source_dir,
+          provider: 'anthropic',
+          dry_run: true,
+          diff_base: 'origin/main'
+        )
+        allow(cli).to receive(:validate_diff_base!)
+        allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+        allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
 
-      expect { cli.extract }.not_to raise_error
-      expect(cli).to have_received(:validate_diff_base!).with(base_ref: 'origin/main')
+        expect { cli.extract }.not_to raise_error
+        expect(cli).to have_received(:validate_diff_base!).with(base_ref: 'origin/main')
+      end
     end
   end
 

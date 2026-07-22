@@ -45,5 +45,19 @@ RSpec.describe I18nContextGenerator::Parsers::JsonParser do
         expect(entries.first.text).to eq('Profile')
       end
     end
+
+    it 'wraps malformed JSON and rejects non-object roots' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.json')
+        File.write(path, '{"broken":')
+
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /Failed to parse JSON translation file.*translations\.json/)
+
+        File.write(path, '["not", "an", "object"]')
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /root must be an object/)
+      end
+    end
   end
 end
