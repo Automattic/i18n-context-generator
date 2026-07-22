@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'set'
 require_relative 'config/validation'
 
 module I18nContextGenerator
