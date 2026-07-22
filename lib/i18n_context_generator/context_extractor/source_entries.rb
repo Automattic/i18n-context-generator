@@ -41,6 +41,7 @@ module I18nContextGenerator
         metadata[:comment] = translation_comment || source_comment if translation_comment || source_comment
         metadata[:source_location] = "#{entry.file}:#{entry.line}"
         metadata[:source_locations] = entry.locations
+        metadata[:source_location_groups] = entry.location_groups
         metadata[:resource_type] = entry.resource_type unless entry.resource_type == :string
 
         Parsers::TranslationEntry.new(

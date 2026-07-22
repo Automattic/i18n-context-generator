@@ -40,6 +40,7 @@ _None_
 - Track complete multiline iOS localization calls so comment-only changes remain discoverable.
 - Expose machine-readable extraction result status instead of requiring consumers to match placeholder text.
 - Avoid duplicate no-change messages for translation diff runs.
+- Preserve source location occurrence groups so multiline changes produce one integration result per call.
 
 ### Internal Changes
 

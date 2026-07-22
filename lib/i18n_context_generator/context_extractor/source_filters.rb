@@ -49,6 +49,27 @@ module I18nContextGenerator
         end
       end
 
+      def changed_result_location_groups_for(entry, changed_locations)
+        return [] if changed_locations.empty?
+
+        location_groups = entry.metadata&.dig(:source_location_groups)
+        return changed_locations.map { |location| [location] } unless location_groups&.any?
+
+        changed_location_set = changed_locations.to_set
+        location_groups.filter_map do |group|
+          changed_group = Array(group).select { |location| changed_location_set.include?(location) }
+          changed_group unless changed_group.empty?
+        end
+      end
+
+      def changed_location_attributes_for(entry, locations)
+        changed_locations = changed_result_locations_for(locations)
+        {
+          changed_locations: changed_locations,
+          changed_location_groups: changed_result_location_groups_for(entry, changed_locations)
+        }
+      end
+
       def normalize_source_line_filter(filter)
         filter.each_with_object(Hash.new { |h, k| h[k] = Set.new }) do |(file, lines), normalized_filter|
           next if file.nil?

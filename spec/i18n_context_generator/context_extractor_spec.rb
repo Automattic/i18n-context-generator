@@ -14,6 +14,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.description).to eq('A greeting')
       expect(result.locations).to eq([])
       expect(result.changed_locations).to eq([])
+      expect(result.changed_location_groups).to eq([])
       expect(result.translation_key).to eq('test.key')
       expect(result.changed_translation_locations).to eq([])
       expect(result.status).to eq(:success)
@@ -26,6 +27,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         key: 'k', text: 't', description: 'd',
         ui_element: 'button', tone: 'formal',
         max_length: 20, locations: ['file.swift:10'], changed_locations: ['file.swift:10'],
+        changed_location_groups: [['file.swift:10']],
         changed_translation_locations: ['Localizable.strings:4']
       )
 
@@ -35,6 +37,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(h[:ui_element]).to eq('button')
       expect(h[:locations]).to eq(['file.swift:10'])
       expect(h[:changed_locations]).to eq(['file.swift:10'])
+      expect(h[:changed_location_groups]).to eq([['file.swift:10']])
       expect(h[:translation_key]).to eq('k')
       expect(h[:changed_translation_locations]).to eq(['Localizable.strings:4'])
       expect(h[:status]).to eq(:success)
@@ -484,7 +487,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Shown in settings screen',
             source_location: 'SettingsViewController.swift:12',
-            source_locations: ['SettingsViewController.swift:12']
+            source_locations: ['SettingsViewController.swift:12'],
+            source_location_groups: [['SettingsViewController.swift:12']]
           }
         )
       )
@@ -550,7 +554,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Button title in the editor',
             source_location: 'EditorViewController.swift:18',
-            source_locations: ['EditorViewController.swift:18']
+            source_locations: ['EditorViewController.swift:18'],
+            source_location_groups: [['EditorViewController.swift:18']]
           }
         )
       )
@@ -654,7 +659,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Visible title',
             source_location: 'Sources/SettingsView.swift:12',
-            source_locations: ['Sources/SettingsView.swift:12']
+            source_locations: ['Sources/SettingsView.swift:12'],
+            source_location_groups: [['Sources/SettingsView.swift:12']]
           }
         )
       )
@@ -700,7 +706,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Visible subtitle',
             source_location: 'Sources/SettingsView.swift:18',
-            source_locations: ['Sources/SettingsView.swift:18']
+            source_locations: ['Sources/SettingsView.swift:18'],
+            source_location_groups: [['Sources/SettingsView.swift:18']]
           }
         )
       )
@@ -732,6 +739,9 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       expect(entry.metadata[:source_locations]).to eq(
         ['Sources/First.swift:10', 'Sources/Preferred.swift:30']
+      )
+      expect(entry.metadata[:source_location_groups]).to eq(
+        [['Sources/First.swift:10', 'Sources/Preferred.swift:30']]
       )
     end
   end
@@ -897,14 +907,25 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       config = I18nContextGenerator::Config.new(
         translations: [],
         discovery_mode: :source,
-        source_line_filter: { 'Sources/FirstSettingsView.swift' => [8] }
+        source_line_filter: {
+          'Sources/FirstSettingsView.swift' => [8, 9],
+          'Sources/SettingsView.swift' => [14]
+        }
       )
       extractor = described_class.new(config)
       source_entry = build_entry(
         'settings.title',
         'Settings',
         metadata: {
-          source_locations: ['./Sources/FirstSettingsView.swift:8', './Sources/SettingsView.swift:14']
+          source_locations: [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          source_location_groups: [
+            ['./Sources/FirstSettingsView.swift:8', './Sources/FirstSettingsView.swift:9'],
+            ['./Sources/SettingsView.swift:14']
+          ]
         }
       )
       searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
@@ -918,8 +939,26 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       result = extractor.send(:process_entry, source_entry)
 
-      expect(result.locations).to eq(['./Sources/FirstSettingsView.swift:8', './Sources/SettingsView.swift:14'])
-      expect(result.changed_locations).to eq(['./Sources/FirstSettingsView.swift:8'])
+      expect(
+        [result.locations, result.changed_locations, result.changed_location_groups]
+      ).to eq(
+        [
+          [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          [
+            ['./Sources/FirstSettingsView.swift:8', './Sources/FirstSettingsView.swift:9'],
+            ['./Sources/SettingsView.swift:14']
+          ]
+        ]
+      )
     end
 
     it 'omits translation comments when the config disables them' do

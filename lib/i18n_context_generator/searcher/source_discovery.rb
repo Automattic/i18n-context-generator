@@ -93,7 +93,8 @@ module I18nContextGenerator
             text: preferred_entry.text,
             comment: preferred_entry.comment,
             resource_type: preferred_entry.resource_type,
-            locations: (existing_entry.locations + entry.locations).uniq
+            locations: (existing_entry.locations + entry.locations).uniq,
+            location_groups: (existing_entry.location_groups + entry.location_groups).uniq
           )
         end.values
       end

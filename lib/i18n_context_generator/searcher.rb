@@ -21,9 +21,13 @@ module I18nContextGenerator
     end
 
     # Represents a localization entry discovered directly from source code.
-    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment, :resource_type, :locations) do
-      def initialize(key:, file:, line:, text: nil, comment: nil, resource_type: :string, locations: nil)
+    DiscoveredLocalization = Data.define(
+      :key, :file, :line, :text, :comment, :resource_type, :locations, :location_groups
+    ) do
+      def initialize(key:, file:, line:, text: nil, comment: nil, resource_type: :string, locations: nil,
+                     location_groups: nil)
         locations ||= ["#{file}:#{line}"]
+        location_groups ||= [locations]
         super
       end
     end

@@ -291,6 +291,7 @@ extractor.results.each do |result|
   result.actionable?                    # Safe to present to a user
   result.locations                      # Every source location used as extraction evidence
   result.changed_locations              # Source evidence changed inside the configured range
+  result.changed_location_groups        # Changed source lines grouped by localization occurrence
   result.translation_key                # Owning translation resource (including Android collections)
   result.changed_translation_locations  # Exact changed lines for that translation resource
 end

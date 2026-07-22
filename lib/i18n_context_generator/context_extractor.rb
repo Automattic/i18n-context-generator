@@ -18,7 +18,7 @@ module I18nContextGenerator
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
                                    :max_length, :locations, :changed_locations, :translation_key,
-                                   :changed_translation_locations, :status, :error) do
+                                   :changed_location_groups, :changed_translation_locations, :status, :error) do
       def initialize(key:, text:, description:, **attributes)
         defaults = {
           source_file: nil,
@@ -27,6 +27,7 @@ module I18nContextGenerator
           max_length: nil,
           locations: [],
           changed_locations: [],
+          changed_location_groups: [],
           translation_key: key,
           changed_translation_locations: [],
           status: attributes[:error] ? :error : :success,
@@ -37,9 +38,7 @@ module I18nContextGenerator
         super(key: key, text: text, description: description, **values)
       end
 
-      def actionable?
-        status == :success && error.nil? && !description.to_s.strip.empty?
-      end
+      def actionable? = status == :success && error.nil? && !description.to_s.strip.empty?
 
       def to_h
         {
@@ -52,6 +51,7 @@ module I18nContextGenerator
           max_length: max_length,
           locations: locations,
           changed_locations: changed_locations,
+          changed_location_groups: changed_location_groups,
           translation_key: translation_key,
           changed_translation_locations: changed_translation_locations,
           status: status,
@@ -290,7 +290,7 @@ module I18nContextGenerator
         tone: llm_result.tone,
         max_length: llm_result.max_length,
         locations: result_locations,
-        changed_locations: changed_result_locations_for(result_locations),
+        **changed_location_attributes_for(entry, result_locations),
         translation_key: translation_key_for(entry),
         changed_translation_locations: changed_translation_locations_for(entry),
         status: llm_result.error ? :error : :success,
@@ -301,7 +301,9 @@ module I18nContextGenerator
         cache.set(
           entry.key,
           entry.text,
-          result.to_h.except(:source_file, :changed_locations, :changed_translation_locations),
+          result.to_h.except(
+            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations
+          ),
           context: cache_ctx
         )
       end
@@ -310,13 +312,14 @@ module I18nContextGenerator
 
     def cached_extraction_result(entry, cached, matches)
       attributes = cached.transform_keys(&:to_sym).except(
-        :source_file, :locations, :changed_locations, :translation_key, :changed_translation_locations
+        :source_file, :locations, :changed_locations, :changed_location_groups,
+        :translation_key, :changed_translation_locations
       )
       locations = result_locations_for(entry, matches)
       ExtractionResult.new(
         source_file: entry.source_file,
         locations: locations,
-        changed_locations: changed_result_locations_for(locations),
+        **changed_location_attributes_for(entry, locations),
         translation_key: translation_key_for(entry),
         changed_translation_locations: changed_translation_locations_for(entry),
         **attributes

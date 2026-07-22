@@ -278,7 +278,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             key: 'settings.multiline.title',
             line: 1,
             comment: 'Settings screen title',
-            locations: ["#{file}:1", "#{file}:2"]
+            locations: ["#{file}:1", "#{file}:2"],
+            location_groups: [["#{file}:1", "#{file}:2"]]
           )
         end
       end
@@ -304,7 +305,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             key: 'settings.split.title',
             line: 2,
             comment: 'Settings screen title',
-            locations: ["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4"]
+            locations: ["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4"],
+            location_groups: [["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4"]]
           )
         end
       end
@@ -342,7 +344,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             file: 'Third.swift',
             line: 30,
             comment: 'Navigation title for settings screen',
-            locations: ['First.swift:10', 'Second.swift:20', 'Third.swift:30']
+            locations: ['First.swift:10', 'Second.swift:20', 'Third.swift:30'],
+            location_groups: [['First.swift:10'], ['Second.swift:20'], ['Third.swift:30']]
           )
         )
 
@@ -356,7 +359,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             file: 'First.swift',
             line: 10,
             comment: nil,
-            locations: ['First.swift:10', 'Second.swift:20']
+            locations: ['First.swift:10', 'Second.swift:20'],
+            location_groups: [['First.swift:10'], ['Second.swift:20']]
           )
         )
       end
