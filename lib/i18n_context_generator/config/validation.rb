@@ -182,7 +182,7 @@ module I18nContextGenerator
       end
 
       def supported_translation_write_back?(path)
-        FileClassifier.translation_platform(path) == :ios || FileClassifier.android_translation_file?(path)
+        !FileClassifier.translation_platform(path).nil?
       end
     end
   end
