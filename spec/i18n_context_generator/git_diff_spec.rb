@@ -148,6 +148,37 @@ RSpec.describe I18nContextGenerator::GitDiff do
         expect(keys).not_to include('existing')
       end
 
+      it 'supports reordered attributes, single quotes, and multiline opening tags' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -1,1 +1,5 @@
+           <resources>
+          +    <string translatable='true'
+          +            formatted="false"
+          +            name='flexible_key'>Flexible</string>
+        DIFF
+
+        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+
+        expect(keys).to include('flexible_key')
+      end
+
+      it 'distinguishes string arrays from string elements with multiline tags' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -1,1 +1,5 @@
+           <resources>
+          +    <string-array translatable='true'
+          +                  name='weekdays'>
+          +        <item>Monday</item>
+          +    </string-array>
+        DIFF
+
+        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+
+        expect(keys).to eq(Set['weekdays'])
+      end
+
       it 'extracts keys when entire plural block is added' do
         diff = described_class.new(base_ref: 'main')
 
