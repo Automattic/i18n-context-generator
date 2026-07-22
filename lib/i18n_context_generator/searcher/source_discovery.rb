@@ -18,6 +18,13 @@ module I18nContextGenerator
         /String\s*\(\s*localized:\s*["'](?<key>[^"']+)["'](?:(?:(?!\)\s*[),]?)[\s\S])*?comment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["'])?/,
         /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)\s*\)/
       ].freeze
+      IOS_LOCALIZATION_CALL_START_PATTERNS = [
+        /NSLocalizedString\s*\(/,
+        /String\s*\(\s*localized:/,
+        /String\s*\(\s*$/,
+        /Text\s*\(/
+      ].freeze
+      IOS_COMMENT_ARGUMENT_PATTERN = /\bcomment:\s*["'](?<comment>(?:\\.|[^"'\\])*)["']/
 
       ANDROID_DISCOVERY_PATTERNS = {
         string: %r{
@@ -118,6 +125,11 @@ module I18nContextGenerator
       end
 
       def extract_ios_entry(lines, file, index, line)
+        if IOS_LOCALIZATION_CALL_START_PATTERNS.any? { |pattern| pattern.match?(line) }
+          next_index, discovered_entry = extract_ios_multiline_entry(lines, file, index)
+          return [next_index, discovered_entry] if discovered_entry
+        end
+
         if (entry = extract_ios_single_line_entry(file, index, line))
           return [index + 1, entry]
         end
@@ -135,26 +147,38 @@ module I18nContextGenerator
       end
 
       def extract_ios_multiline_entry(lines, file, start_index, lookahead: 8)
-        end_index = [lines.length - 1, start_index + lookahead].min
+        end_index = ios_call_end_index(lines, start_index, lookahead: lookahead)
         snippet = lines[start_index..end_index].join("\n")
         pattern = IOS_MULTILINE_DISCOVERY_PATTERNS.find { |candidate| candidate.match?(snippet) }
         return [start_index + 1, nil] unless pattern
 
         match = pattern.match(snippet)
         key_line_index = locate_key_line(lines, start_index, end_index, match[:key])
+        comment_match = IOS_COMMENT_ARGUMENT_PATTERN.match(snippet)
+        locations = (start_index..end_index).map { |index| "#{file}:#{index + 1}" }
 
         [
-          (key_line_index || start_index) + 1,
-          build_ios_discovered_entry(file, key_line_index || start_index, match)
+          end_index + 1,
+          build_ios_discovered_entry(
+            file,
+            key_line_index || start_index,
+            match,
+            comment_match: comment_match,
+            locations: locations
+          )
         ]
       end
 
-      def build_ios_discovered_entry(file, index, match)
+      def build_ios_discovered_entry(file, index, match, comment_match: nil, locations: nil)
         key = match[:key]
         return if key.nil? || key.empty?
 
         text = match.names.include?('text') ? match[:text] : nil
-        comment = match.names.include?('comment') ? unescape_source_string(match[:comment]) : nil
+        comment = if comment_match
+                    unescape_source_string(comment_match[:comment])
+                  elsif match.names.include?('comment')
+                    unescape_source_string(match[:comment])
+                  end
         text = unescape_source_string(text) if text
 
         DiscoveredLocalization.new(
@@ -162,8 +186,50 @@ module I18nContextGenerator
           file: file,
           line: index + 1,
           text: text,
-          comment: comment
+          comment: comment,
+          locations: locations
         )
+      end
+
+      def ios_call_end_index(lines, start_index, lookahead:)
+        maximum_index = [lines.length - 1, start_index + lookahead].min
+        depth = 0
+        found_opening = false
+
+        (start_index..maximum_index).each do |index|
+          parenthesis_delta(lines[index]).each do |delta|
+            found_opening = true if delta.positive?
+            depth += delta
+          end
+          return index if found_opening && depth <= 0
+        end
+
+        maximum_index
+      end
+
+      def parenthesis_delta(line)
+        deltas = []
+        quote = nil
+        escaped = false
+
+        line.each_char do |character|
+          if quote
+            if escaped
+              escaped = false
+            elsif character == '\\'
+              escaped = true
+            elsif character == quote
+              quote = nil
+            end
+          elsif ["'", '"'].include?(character)
+            quote = character
+          elsif character == '('
+            deltas << 1
+          elsif character == ')'
+            deltas << -1
+          end
+        end
+        deltas
       end
 
       def locate_key_line(lines, start_index, end_index, key)
