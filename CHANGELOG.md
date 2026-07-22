@@ -10,6 +10,24 @@ _None_
 
 ### New Features
 
+_None_
+
+### Bug Fixes
+
+_None_
+
+### Internal Changes
+
+_None_
+
+## 0.5.0
+
+### Breaking Changes
+
+_None_
+
+### New Features
+
 - Support explicit base and head refs for diff-backed extraction.
 - Expose changed source and translation locations separately from the complete extraction evidence.
 
@@ -19,6 +37,8 @@ _None_
 - Normalize symbol values accepted by the programmatic configuration API.
 - Scope diff-selected duplicate keys to the translation file that changed.
 - Limit changed Android collection entries to the exact plural quantity or array item.
+- Track complete multiline iOS localization calls so comment-only changes remain discoverable.
+- Expose machine-readable extraction result status instead of requiring consumers to match placeholder text.
 
 ### Internal Changes
 

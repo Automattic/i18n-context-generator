@@ -30,6 +30,17 @@ RSpec.describe I18nContextGenerator::Writers::Helpers do
       expect(helper_host.writable_result?(result)).to be false
     end
 
+    it 'uses extraction status instead of matching placeholder wording' do
+      result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'unused',
+        text: 'Unused',
+        description: 'No matching reference was discovered',
+        status: :no_usage
+      )
+
+      expect(helper_host.writable_result?(result)).to be false
+    end
+
     it 'accepts valid results' do
       result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
         key: 'settings.title',

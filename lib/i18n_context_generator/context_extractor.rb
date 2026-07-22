@@ -18,7 +18,7 @@ module I18nContextGenerator
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
                                    :max_length, :locations, :changed_locations, :translation_key,
-                                   :changed_translation_locations, :error) do
+                                   :changed_translation_locations, :status, :error) do
       def initialize(key:, text:, description:, **attributes)
         defaults = {
           source_file: nil,
@@ -29,9 +29,16 @@ module I18nContextGenerator
           changed_locations: [],
           translation_key: key,
           changed_translation_locations: [],
+          status: attributes[:error] ? :error : :success,
           error: nil
         }
-        super(key: key, text: text, description: description, **defaults.merge(attributes))
+        values = defaults.merge(attributes)
+        values[:status] = values[:status].to_sym if values[:status].respond_to?(:to_sym)
+        super(key: key, text: text, description: description, **values)
+      end
+
+      def actionable?
+        status == :success && error.nil? && !description.to_s.strip.empty?
       end
 
       def to_h
@@ -47,6 +54,7 @@ module I18nContextGenerator
           changed_locations: changed_locations,
           translation_key: translation_key,
           changed_translation_locations: changed_translation_locations,
+          status: status,
           error: error
         }
       end
@@ -205,6 +213,7 @@ module I18nContextGenerator
             source_file: entry.source_file,
             translation_key: translation_key_for(entry),
             changed_translation_locations: changed_translation_locations_for(entry),
+            status: :error,
             error: e.message
           )
           @results << result
@@ -237,6 +246,7 @@ module I18nContextGenerator
           source_file: entry.source_file,
           translation_key: translation_key_for(entry),
           changed_translation_locations: changed_translation_locations_for(entry),
+          status: :no_usage,
           locations: []
         )
       end
@@ -283,6 +293,7 @@ module I18nContextGenerator
         changed_locations: changed_result_locations_for(result_locations),
         translation_key: translation_key_for(entry),
         changed_translation_locations: changed_translation_locations_for(entry),
+        status: llm_result.error ? :error : :success,
         error: llm_result.error
       )
 

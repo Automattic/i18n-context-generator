@@ -16,6 +16,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.changed_locations).to eq([])
       expect(result.translation_key).to eq('test.key')
       expect(result.changed_translation_locations).to eq([])
+      expect(result.status).to eq(:success)
+      expect(result).to be_actionable
       expect(result.error).to be_nil
     end
 
@@ -35,6 +37,21 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(h[:changed_locations]).to eq(['file.swift:10'])
       expect(h[:translation_key]).to eq('k')
       expect(h[:changed_translation_locations]).to eq(['Localizable.strings:4'])
+      expect(h[:status]).to eq(:success)
+    end
+
+    it 'exposes non-actionable result states without relying on description text' do
+      no_usage = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'unused', text: 'Unused', description: 'Nothing referenced this key', status: :no_usage
+      )
+      failed = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'failed', text: 'Failed', description: 'Provider unavailable', error: 'timeout'
+      )
+      blank = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'blank', text: 'Blank', description: ' '
+      )
+
+      expect([no_usage.actionable?, failed.actionable?, blank.actionable?]).to eq([false, false, false])
     end
   end
 
@@ -750,6 +767,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:process_entry, entry)
 
       expect(result.description).to eq('No usage found in source code')
+      expect(result.status).to eq(:no_usage)
+      expect(result).not_to be_actionable
       expect(result.locations).to eq([])
       expect(result.error).to be_nil
     end
@@ -916,7 +935,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           'key' => 'settings.title',
           'text' => 'Settings',
           'description' => 'Cached description',
-          'locations' => ['stale.swift:99']
+          'locations' => ['stale.swift:99'],
+          'status' => 'success'
         }
       )
       llm = instance_double(I18nContextGenerator::LLM::OpenAI)
@@ -928,6 +948,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       expect(llm).not_to have_received(:generate_context)
       expect(result.description).to eq('Cached description')
+      expect(result.status).to eq(:success)
+      expect(result).to be_actionable
       expect(result.locations).to eq(['/tmp/SettingsViewController.swift:10'])
       expect(result.changed_locations).to eq(['/tmp/SettingsViewController.swift:10'])
     end

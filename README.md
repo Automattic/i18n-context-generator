@@ -287,6 +287,8 @@ extractor = I18nContextGenerator::ContextExtractor.new(config)
 extractor.run
 
 extractor.results.each do |result|
+  result.status                         # :success, :no_usage, or :error
+  result.actionable?                    # Safe to present to a user
   result.locations                      # Every source location used as extraction evidence
   result.changed_locations              # Source evidence changed inside the configured range
   result.translation_key                # Owning translation resource (including Android collections)
