@@ -206,9 +206,9 @@ module I18nContextGenerator
           # How to handle existing comments: "replace" or "append"
           # context_mode: #{schema.default(:context_mode)}
 
-        # Swift-specific configuration for write_back_to_code
+        # Swift-specific extraction and write-back configuration
         swift:
-          # Localization functions to update (default shown)
+          # Custom entries extend the built-in localization functions (defaults shown)
           functions:
         #{swift_functions}
             # Add custom functions like:

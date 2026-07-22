@@ -51,6 +51,14 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.context_prefix).to eq('')
     end
 
+    it 'adds custom Swift functions without removing the built-in syntaxes' do
+      config = described_class.new(swift_functions: %w[MyLocalizedString NSLocalizedString])
+
+      expect(config.swift_functions).to eq(
+        ['NSLocalizedString', 'String(localized:', 'Text(', 'MyLocalizedString']
+      )
+    end
+
     it 'allows nil output_path' do
       config = described_class.new(output_path: nil)
 
@@ -476,13 +484,17 @@ RSpec.describe I18nContextGenerator::Config do
         translations: 'Localizable.strings',
         source_paths: [],
         ignore_patterns: 'build',
+        swift_functions: 'MyLocalizedString',
         dry_run: 'yes',
         model: 123,
         context_prefix: nil
       )
 
       expect { config.validate! }
-        .to raise_error(I18nContextGenerator::Error, /translations.*source_paths.*ignore_patterns.*dry_run.*model/)
+        .to raise_error(
+          I18nContextGenerator::Error,
+          /translations.*source_paths.*ignore_patterns.*swift_functions.*dry_run.*model/
+        )
     end
 
     it 'rejects blank optional strings' do

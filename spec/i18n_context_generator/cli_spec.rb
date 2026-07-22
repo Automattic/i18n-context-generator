@@ -143,6 +143,7 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(parsed.dig('cache', 'directory')).to eq(schema.default(:cache_dir))
       expect(parsed.dig('swift', 'functions')).to eq(schema.default(:swift_functions))
       expect(parsed.dig('privacy', 'redact_prompts')).to eq(schema.default(:redact_prompts))
+      expect(sample).to include('Custom entries extend the built-in localization functions')
     end
   end
 

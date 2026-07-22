@@ -50,7 +50,9 @@ module I18nContextGenerator
       @key_filter = fetch_config_value(attrs, :key_filter, nil)
       @write_back = fetch_boolean_value(attrs, :write_back, Schema.default(:write_back))
       @write_back_to_code = fetch_boolean_value(attrs, :write_back_to_code, Schema.default(:write_back_to_code))
-      @swift_functions = fetch_defaulting_value(attrs, :swift_functions, default_swift_functions)
+      @swift_functions = merge_swift_functions(
+        fetch_defaulting_value(attrs, :swift_functions, default_swift_functions)
+      )
       @diff_base = fetch_config_value(attrs, :diff_base, nil)
       @diff_head = fetch_defaulting_value(attrs, :diff_head, Schema.default(:diff_head))
       @context_prefix = fetch_defaulting_value(attrs, :context_prefix, Schema.default(:context_prefix))
@@ -294,6 +296,12 @@ module I18nContextGenerator
       return default unless attrs.key?(key)
 
       attrs[key].nil? ? default : attrs[key]
+    end
+
+    def merge_swift_functions(functions)
+      return functions unless functions.is_a?(Array) && functions.all?(String)
+
+      LocalizationSyntax.functions_with_defaults(functions)
     end
 
     def merge_cli_scalar_options(options)
