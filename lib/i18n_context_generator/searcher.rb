@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
 require 'find'
-require 'set'
 require 'concurrent'
 require_relative 'searcher/comment_masking'
 require_relative 'searcher/source_discovery'
