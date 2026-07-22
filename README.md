@@ -287,8 +287,10 @@ extractor = I18nContextGenerator::ContextExtractor.new(config)
 extractor.run
 
 extractor.results.each do |result|
-  result.locations          # Every source location used as extraction evidence
-  result.changed_locations  # Evidence locations changed inside the configured range
+  result.locations                      # Every source location used as extraction evidence
+  result.changed_locations              # Source evidence changed inside the configured range
+  result.translation_key                # Owning translation resource (including Android collections)
+  result.changed_translation_locations  # Exact changed lines for that translation resource
 end
 ```
 

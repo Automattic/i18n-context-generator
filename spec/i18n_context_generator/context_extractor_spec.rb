@@ -14,6 +14,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.description).to eq('A greeting')
       expect(result.locations).to eq([])
       expect(result.changed_locations).to eq([])
+      expect(result.translation_key).to eq('test.key')
+      expect(result.changed_translation_locations).to eq([])
       expect(result.error).to be_nil
     end
 
@@ -21,7 +23,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
         key: 'k', text: 't', description: 'd',
         ui_element: 'button', tone: 'formal',
-        max_length: 20, locations: ['file.swift:10'], changed_locations: ['file.swift:10']
+        max_length: 20, locations: ['file.swift:10'], changed_locations: ['file.swift:10'],
+        changed_translation_locations: ['Localizable.strings:4']
       )
 
       h = result.to_h
@@ -30,6 +33,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(h[:ui_element]).to eq('button')
       expect(h[:locations]).to eq(['file.swift:10'])
       expect(h[:changed_locations]).to eq(['file.swift:10'])
+      expect(h[:translation_key]).to eq('k')
+      expect(h[:changed_translation_locations]).to eq(['Localizable.strings:4'])
     end
   end
 
@@ -186,10 +191,15 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         diff_base: 'origin/main'
       )
       extractor = described_class.new(config)
-      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_keys: Set['days_of_week'])
+      git_diff = instance_double(
+        I18nContextGenerator::GitDiff,
+        changed_key_locations: {
+          ['res/values/strings.xml', 'days_of_week'] => ['res/values/strings.xml:4']
+        }
+      )
       entries = [
-        build_entry('days_of_week[0]', 'Monday'),
-        build_entry('settings.title', 'Settings')
+        build_entry('days_of_week[0]', 'Monday', source_file: 'res/values/strings.xml'),
+        build_entry('settings.title', 'Settings', source_file: 'res/values/strings.xml')
       ]
 
       allow(I18nContextGenerator::GitDiff).to receive(:new)
@@ -198,6 +208,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:filter_by_diff, entries)
 
       expect(result.map(&:key)).to eq(['days_of_week[0]'])
+      expect(extractor.send(:changed_translation_locations_for, result.first))
+        .to eq(['res/values/strings.xml:4'])
     end
 
     it 'returns an empty array when git diff reports no changed keys' do
@@ -206,12 +218,37 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         diff_base: 'origin/main'
       )
       extractor = described_class.new(config)
-      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_keys: Set.new)
+      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_key_locations: {})
 
       allow(I18nContextGenerator::GitDiff).to receive(:new)
         .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       expect(extractor.send(:filter_by_diff, [build_entry('settings.title', 'Settings')])).to eq([])
+    end
+
+    it 'scopes changed duplicate keys to their translation file' do
+      config = I18nContextGenerator::Config.new(
+        translations: %w[english.strings french.strings],
+        diff_base: 'origin/main'
+      )
+      extractor = described_class.new(config)
+      git_diff = instance_double(
+        I18nContextGenerator::GitDiff,
+        changed_key_locations: {
+          ['english.strings', 'shared.key'] => ['english.strings:1']
+        }
+      )
+      entries = [
+        build_entry('shared.key', 'English', source_file: 'english.strings'),
+        build_entry('shared.key', 'French', source_file: 'french.strings')
+      ]
+
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
+
+      result = extractor.send(:filter_by_diff, entries)
+
+      expect(result.map(&:text)).to eq(['English'])
     end
   end
 

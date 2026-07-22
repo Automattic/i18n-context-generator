@@ -8,6 +8,8 @@ RSpec.describe I18nContextGenerator::GitDiff do
         File.write(path, "\"existing\" = \"Existing\";\n")
         status = instance_double(Process::Status, success?: true)
         diff_output = <<~DIFF
+          @@ -1,1 +1,4 @@
+           "existing" = "Existing";
           +"save.button" = "Save";
           +"cart+cta" = "Cart";
           +"key,with,commas" = "Commas";
@@ -16,11 +18,19 @@ RSpec.describe I18nContextGenerator::GitDiff do
         allow(Open3).to receive(:capture3).and_return([diff_output, '', status])
 
         keys = described_class.new(base_ref: 'danger_base', head_ref: 'danger_head').changed_keys([path])
+        locations = described_class.new(
+          base_ref: 'danger_base', head_ref: 'danger_head'
+        ).changed_key_locations([path])
 
         expect(keys).to eq(Set['save.button', 'cart+cta', 'key,with,commas'])
+        expect(locations).to eq(
+          [path, 'save.button'] => ["#{path}:2"],
+          [path, 'cart+cta'] => ["#{path}:3"],
+          [path, 'key,with,commas'] => ["#{path}:4"]
+        )
         expect(Open3).to have_received(:capture3).with(
           'git', 'diff', 'danger_base...danger_head', '--', 'Localizable.strings', chdir: dir
-        )
+        ).twice
       end
     end
 
@@ -253,6 +263,22 @@ RSpec.describe I18nContextGenerator::GitDiff do
         keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
 
         expect(keys).to include('post_likes')
+      end
+
+      it 'maps changed collection items to their parent resource and changed line' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -5,4 +5,4 @@
+               <plurals name="post_likes">
+                   <item quantity="one">%d like</item>
+          -        <item quantity="other">%d likes</item>
+          +        <item quantity="other">%d total likes</item>
+               </plurals>
+        DIFF
+
+        locations = diff.send(:extract_xml_key_locations, diff_output, 'res/values/strings.xml')
+
+        expect(locations).to eq('post_likes' => ['res/values/strings.xml:7'])
       end
 
       it 'tracks parent from context lines for changed items in string-array' do

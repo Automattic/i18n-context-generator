@@ -15,18 +15,33 @@ module I18nContextGenerator
     # @param translation_paths [Array<String>] paths to translation files
     # @return [Set<String>] set of changed keys
     def changed_keys(translation_paths)
-      keys = Set.new
+      changed_key_locations(translation_paths).each_key.to_set(&:last)
+    end
 
-      translation_paths.each do |path|
+    # Get changed translation keys together with the exact changed lines that
+    # produced them. Keys are scoped by translation file so duplicate keys in
+    # different files remain distinct.
+    # @return [Hash{Array(String, String) => Array<String>}]
+    def changed_key_locations(translation_paths)
+      translation_paths.each_with_object({}) do |path, changes|
         next unless File.exist?(path)
 
         diff_output = git_diff_for_path(path)
         next if diff_output.empty?
 
-        keys.merge(extract_keys_from_diff(diff_output, path))
+        normalized_path = Pathname.new(path).cleanpath.to_s
+        key_locations = case File.extname(path).downcase
+                        when '.strings'
+                          extract_strings_key_locations(diff_output, normalized_path)
+                        when '.xml'
+                          extract_xml_key_locations(diff_output, normalized_path)
+                        else
+                          {}
+                        end
+        key_locations.each do |key, locations|
+          changes[[normalized_path, key]] = locations
+        end
       end
-
-      keys
     end
 
     # Get changed line numbers in source files since the base ref.
@@ -153,19 +168,43 @@ module I18nContextGenerator
       keys
     end
 
+    def extract_strings_key_locations(diff_output, file_path)
+      locations = Hash.new { |hash, key| hash[key] = [] }
+
+      each_added_diff_line(diff_output) do |line, line_number|
+        next unless line =~ /^\+\s*"([^"]+)"\s*=/
+
+        locations[Regexp.last_match(1)] << "#{file_path}:#{line_number}"
+      end
+
+      locations
+    end
+
     # Extract keys from Android strings.xml diff.
     # Tracks parent element context from diff lines and uses hunk headers to
     # map added lines to file positions. When an added <item> can't be attributed
     # to a parent from diff context alone (e.g. large plural/array blocks where the
     # opener isn't in the hunk), falls back to reading the actual file.
     def extract_xml_keys(diff_output, file_path)
+      extract_xml_changes(diff_output, file_path)[:keys]
+    end
+
+    def extract_xml_key_locations(diff_output, file_path)
+      extract_xml_changes(diff_output, file_path)[:locations].transform_values do |lines|
+        lines.map { |line| "#{file_path}:#{line}" }
+      end
+    end
+
+    def extract_xml_changes(diff_output, file_path)
       state = {
         keys: Set.new,
+        locations: Hash.new { |hash, key| hash[key] = Set.new },
         current_parent: nil,
         current_string: nil,
         file_line: nil,
         orphaned_item_file_lines: [],
-        pending_tag: nil
+        pending_tag: nil,
+        file_path: file_path
       }
 
       diff_output.each_line do |line|
@@ -179,9 +218,11 @@ module I18nContextGenerator
         state[:file_line] += 1 if state[:file_line] && !is_removed
       end
 
-      resolve_orphaned_items(state[:keys], state[:orphaned_item_file_lines], file_path)
+      resolve_orphaned_items(
+        state[:keys], state[:orphaned_item_file_lines], file_path, locations: state[:locations]
+      )
 
-      state[:keys]
+      { keys: state[:keys], locations: state[:locations] }
     end
 
     def update_xml_hunk_line?(state, line)
@@ -193,8 +234,8 @@ module I18nContextGenerator
     end
 
     def process_xml_diff_content(state, content, added:)
-      state[:keys] << state[:current_parent] if added && state[:current_parent]
-      state[:keys] << state[:current_string] if added && state[:current_string]
+      record_xml_change(state, state[:current_parent]) if added && state[:current_parent]
+      record_xml_change(state, state[:current_string]) if added && state[:current_string]
 
       accumulate_xml_opening_tag(state, content, added: added)
       complete_xml_opening_tag(state) if state.dig(:pending_tag, :content)&.include?('>')
@@ -208,8 +249,13 @@ module I18nContextGenerator
       if state[:pending_tag]
         state[:pending_tag][:content] << content
         state[:pending_tag][:added] ||= added
+        state[:pending_tag][:first_added_line] ||= state[:file_line] if added
       elsif (tag_start = content.index(/<(?:string-array|plurals|string)\b/))
-        state[:pending_tag] = { content: content[tag_start..], added: added }
+        state[:pending_tag] = {
+          content: content[tag_start..],
+          added: added,
+          first_added_line: (state[:file_line] if added)
+        }
       end
     end
 
@@ -217,7 +263,7 @@ module I18nContextGenerator
       tag = state[:pending_tag]
       resource = resource_from_opening_tag(tag[:content])
       if resource
-        state[:keys] << resource[:name] if tag[:added]
+        record_xml_change(state, resource[:name], line: tag[:first_added_line]) if tag[:added]
         track_open_xml_resource(state, resource, tag[:content])
       end
       state[:pending_tag] = nil
@@ -233,10 +279,17 @@ module I18nContextGenerator
 
     def track_xml_item_change(state)
       if state[:current_parent]
-        state[:keys] << state[:current_parent]
+        record_xml_change(state, state[:current_parent])
       elsif state[:file_line]
         state[:orphaned_item_file_lines] << state[:file_line]
       end
+    end
+
+    def record_xml_change(state, key, line: state[:file_line])
+      return unless key
+
+      state[:keys] << key
+      state[:locations][key] << line if line
     end
 
     def resource_from_opening_tag(tag)
@@ -249,7 +302,7 @@ module I18nContextGenerator
 
     # Build a map of file line numbers to enclosing plural/array resource names,
     # then use it to attribute orphaned <item> additions to their parent.
-    def resolve_orphaned_items(keys, orphaned_lines, file_path)
+    def resolve_orphaned_items(keys, orphaned_lines, file_path, locations: nil)
       return if orphaned_lines.empty? || !File.exist?(file_path)
 
       current_parent = nil
@@ -275,7 +328,33 @@ module I18nContextGenerator
 
       orphaned_lines.each do |line_num|
         parent = parent_at_line[line_num]
-        keys << parent if parent
+        next unless parent
+
+        keys << parent
+        locations[parent] << line_num if locations
+      end
+    end
+
+    def each_added_diff_line(diff_output)
+      new_line_number = nil
+
+      diff_output.each_line do |line|
+        if (match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          new_line_number = match[1].to_i
+          next
+        end
+
+        next if new_line_number.nil?
+        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
+
+        if line.start_with?('+')
+          yield(line, new_line_number)
+          new_line_number += 1
+        elsif line.start_with?('-')
+          next
+        else
+          new_line_number += 1
+        end
       end
     end
   end
