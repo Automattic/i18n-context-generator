@@ -87,6 +87,45 @@ RSpec.describe I18nContextGenerator::CLI do
     end
   end
 
+  describe 'destination validation' do
+    let(:cli) { described_class.allocate }
+
+    it 'allows dry runs without a destination' do
+      config = I18nContextGenerator::Config.new(dry_run: true)
+
+      expect { cli.send(:validate_destination!, config) }.not_to raise_error
+    end
+
+    it 'allows each durable destination' do
+      configurations = [
+        I18nContextGenerator::Config.new(output_path: 'context.csv'),
+        I18nContextGenerator::Config.new(write_back: true),
+        I18nContextGenerator::Config.new(write_back_to_code: true)
+      ]
+
+      configurations.each do |config|
+        expect { cli.send(:validate_destination!, config) }.not_to raise_error
+      end
+    end
+
+    it 'rejects paid extraction without a destination' do
+      config = I18nContextGenerator::Config.new
+
+      expect { cli.send(:validate_destination!, config) }
+        .to raise_error(I18nContextGenerator::Error, /requires --output, --write-back, or --write-back-to-code/)
+    end
+  end
+
+  describe 'sample configuration' do
+    it 'describes client ignores as additions without repeating built-in defaults' do
+      sample = described_class.allocate.send(:sample_config)
+
+      expect(sample).to include('extend the built-in dependency, build, and test ignores')
+      expect(sample).to include('- "**/*.generated.*"')
+      expect(sample).not_to include('- "**/Pods/**"', '- "**/build/**"', '- "**/*Tests*"')
+    end
+  end
+
   describe '#extract' do
     let(:cli) { described_class.allocate }
 
@@ -95,7 +134,7 @@ RSpec.describe I18nContextGenerator::CLI do
         config_path = File.join(dir, '.i18n-context-generator.yml')
         File.write(config_path, "llm:\n  provider: openai\n")
 
-        config = I18nContextGenerator::Config.new(translations: [], provider: 'openai')
+        config = I18nContextGenerator::Config.new(translations: [], provider: 'openai', output_path: 'context.csv')
         extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
 
         allow(cli).to receive(:options).and_return(
@@ -117,7 +156,11 @@ RSpec.describe I18nContextGenerator::CLI do
     end
 
     it 'exits non-zero when extraction completes with errors' do
-      config = I18nContextGenerator::Config.new(translations: ['Localizable.strings'], dry_run: false)
+      config = I18nContextGenerator::Config.new(
+        translations: ['Localizable.strings'],
+        output_path: 'context.csv',
+        dry_run: false
+      )
       errored_result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
         key: 'settings.title',
         text: 'Settings',

@@ -7,7 +7,7 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(config.translations).to eq([])
       expect(config.source_paths).to eq(['.'])
-      expect(config.ignore_patterns).to eq([])
+      expect(config.ignore_patterns).to eq(described_class.default_ignore_patterns)
       expect(config.provider).to eq('anthropic')
       expect(config.concurrency).to eq(5)
       expect(config.context_lines).to eq(15)
@@ -70,7 +70,7 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(config.translations).to eq([])
       expect(config.source_paths).to eq(['.'])
-      expect(config.ignore_patterns).to eq([])
+      expect(config.ignore_patterns).to eq(described_class.default_ignore_patterns)
       expect(config.provider).to eq('anthropic')
       expect(config.concurrency).to eq(5)
       expect(config.context_lines).to eq(15)
@@ -160,7 +160,8 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(config.translations).to eq(['path/to/Localizable.strings', 'path/to/strings.xml'])
       expect(config.source_paths).to eq(['./Sources', './App'])
-      expect(config.ignore_patterns).to eq(['**/Generated/**', '**/*.test.swift'])
+      expect(config.ignore_patterns).to include(*described_class.default_ignore_patterns)
+      expect(config.ignore_patterns).to include('**/Generated/**', '**/*.test.swift')
       expect(config.provider).to eq('anthropic')
       expect(config.model).to eq('claude-3-haiku')
       expect(config.discovery_mode).to eq('source')
@@ -311,6 +312,43 @@ RSpec.describe I18nContextGenerator::Config do
       expect(patterns).to include('**/*Tests.kt')
       expect(patterns).to include('**/*Test.java')
       expect(patterns).to include('**/*Test.kt')
+    end
+  end
+
+  describe '#validate!' do
+    it 'returns itself for a valid configuration' do
+      config = described_class.new
+
+      expect(config.validate!).to be(config)
+    end
+
+    it 'rejects unsafe numeric values' do
+      config = described_class.new(concurrency: 0, context_lines: -1, max_matches_per_key: 1.5)
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /concurrency.*context_lines.*max_matches_per_key/)
+    end
+
+    it 'rejects unknown domain values loaded outside Thor' do
+      config = described_class.new(
+        provider: 'unknown',
+        output_format: 'xml',
+        context_mode: 'merge',
+        discovery_mode: 'magic'
+      )
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /provider.*output_format.*context_mode.*discovery_mode/)
+    end
+  end
+
+  describe '.merge_ignore_patterns' do
+    it 'extends the defaults and removes duplicates' do
+      patterns = described_class.merge_ignore_patterns(['**/build/**', '**/Generated/**'])
+
+      expect(patterns).to include(*described_class.default_ignore_patterns)
+      expect(patterns).to include('**/Generated/**')
+      expect(patterns.count('**/build/**')).to eq(1)
     end
   end
 end

@@ -97,10 +97,9 @@ translations:
 source:
   paths:
     - ios/MyApp
+  # Optional additions to the built-in dependency, build, and test ignores
   ignore:
-    - "**/Pods/**"
-    - "**/build/**"
-    - "**/*Tests*"
+    - "**/*.generated.*"
 
 llm:
   provider: anthropic
@@ -132,6 +131,7 @@ privacy:
 ```
 
 Use a separate config for Android instead of mixing iOS and Android paths in the same run.
+Client `source.ignore` entries extend the built-in ignore list; they do not replace it.
 
 ## CLI Reference
 
