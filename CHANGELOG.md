@@ -10,11 +10,13 @@ _None_
 
 ### New Features
 
-_None_
+- Support explicit base and head refs for diff-backed extraction.
+- Expose changed source locations separately from the complete extraction evidence.
 
 ### Bug Fixes
 
-_None_
+- Raise actionable errors when Git diff execution fails instead of treating the range as unchanged.
+- Normalize symbol values accepted by the programmatic configuration API.
 
 ### Internal Changes
 
