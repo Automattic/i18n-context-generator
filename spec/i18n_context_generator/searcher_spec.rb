@@ -186,6 +186,36 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(inline_searcher.search('settings.inline').map(&:file)).to eq([file])
         end
       end
+
+      it 'builds explicit localization patterns once per filtering pass' do
+        counting_searcher_class = Class.new(described_class) do
+          attr_reader :ios_pattern_builds, :android_pattern_builds
+
+          private
+
+          def build_ios_patterns(key)
+            @ios_pattern_builds = ios_pattern_builds.to_i + 1
+            super
+          end
+
+          def build_android_patterns(key, resource_type: nil)
+            @android_pattern_builds = android_pattern_builds.to_i + 1
+            super
+          end
+        end
+        counting_searcher = counting_searcher_class.new(
+          source_paths: [],
+          ignore_patterns: [],
+          platform: :ios
+        )
+        matches = [
+          described_class::Match.new(file: 'First.swift', line: 1, match_line: 'Text("settings.title")'),
+          described_class::Match.new(file: 'Second.swift', line: 2, match_line: 'Text("settings.title")')
+        ]
+
+        expect(counting_searcher.send(:filter_matches, matches, 'settings.title')).to eq(matches)
+        expect(counting_searcher).to have_attributes(ios_pattern_builds: 1, android_pattern_builds: 1)
+      end
     end
 
     describe 'match context' do

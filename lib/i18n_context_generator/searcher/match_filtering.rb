@@ -8,19 +8,20 @@ module I18nContextGenerator
 
       def filter_matches(matches, key)
         seen = Set.new
+        explicit_patterns = explicit_localization_patterns(key)
         matches.select do |match|
           location = "#{match.file}:#{match.line}"
           next false if seen.include?(location)
-          next false if false_positive?(match.match_line, key)
+          next false if false_positive?(match.match_line, key, explicit_patterns)
           next false if translation_file?(match.file)
 
           seen.add(location)
         end
       end
 
-      def false_positive?(line, key)
+      def false_positive?(line, key, explicit_patterns)
         return false if line.nil? || line.empty?
-        return false if explicit_localization_usage?(line, key)
+        return false if explicit_localization_usage?(line, explicit_patterns)
 
         quoted_key = "[\"']#{Regexp.escape(key)}[\"']"
         comparison_patterns = [
@@ -35,9 +36,12 @@ module I18nContextGenerator
         comparison_patterns.any? { |pattern| pattern.match?(line) }
       end
 
-      def explicit_localization_usage?(line, key)
-        patterns = build_ios_patterns(key) + build_android_patterns(key)
-        patterns.any? { |pattern| Regexp.new(pattern).match?(line) }
+      def explicit_localization_patterns(key)
+        (build_ios_patterns(key) + build_android_patterns(key)).map { |pattern| Regexp.new(pattern) }
+      end
+
+      def explicit_localization_usage?(line, patterns)
+        patterns.any? { |pattern| pattern.match?(line) }
       end
 
       def translation_file?(file)
