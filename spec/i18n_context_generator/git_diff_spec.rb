@@ -360,6 +360,20 @@ RSpec.describe I18nContextGenerator::GitDiff do
         end
       end
 
+      it 'ignores whitespace-only additions inside Android collections' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -1,4 +1,5 @@
+           <resources>
+             <plurals name="item_count">
+          +
+               <item quantity="one">One item</item>
+             </plurals>
+        DIFF
+
+        expect(diff.send(:extract_xml_keys, diff_output, '/nonexistent')).to be_empty
+      end
+
       it 'ignores resource-shaped tags inside XML comments' do
         diff = described_class.new(base_ref: 'main')
         diff_output = <<~DIFF

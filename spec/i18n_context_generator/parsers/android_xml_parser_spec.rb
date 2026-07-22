@@ -61,7 +61,7 @@ RSpec.describe I18nContextGenerator::Parsers::AndroidXmlParser do
       end
     end
 
-    it 'exposes exact entry and parent line spans in metadata' do
+    it 'exposes exact entry line spans in metadata' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')
         File.write(path, <<~XML)
@@ -79,14 +79,13 @@ RSpec.describe I18nContextGenerator::Parsers::AndroidXmlParser do
 
         expect(entries.find { |entry| entry.key == 'title' }.metadata).to include(
           resource_type: :string,
-          line_span: (2..3),
-          resource_line_span: (2..3)
+          line_span: (2..3)
         )
         expect(entries.find { |entry| entry.key == 'items:one' }.metadata).to include(
           resource_type: :plural,
-          line_span: (5..6),
-          resource_line_span: (4..7)
+          line_span: (5..6)
         )
+        expect(entries.flat_map { |entry| entry.metadata.keys }).not_to include(:resource_line_span)
       end
     end
 

@@ -11,6 +11,7 @@ module I18nContextGenerator
 
       def filter_by_diff(entries)
         @android_collection_members_by_location = {}
+        @android_resource_indexes_by_file = {}
         @changed_translation_locations = git_diff.changed_key_locations(@config.translations)
 
         return [] if @changed_translation_locations.empty?
@@ -43,13 +44,18 @@ module I18nContextGenerator
         metadata = entry.metadata || {}
         return locations unless metadata[:plural] || metadata[:array]
 
-        locations.select do |location|
+        members_by_location = locations.to_h do |location|
           line_number = location.rpartition(':').last.to_i
-          next true if metadata[:line_span]&.cover?(line_number)
-
-          member = android_collection_member_at(location, translation_key_for(entry))
-          member.nil? || member == entry.key
+          member = if metadata[:line_span]&.cover?(line_number)
+                     entry.key
+                   else
+                     android_collection_member_at(location, translation_key_for(entry))
+                   end
+          [location, member]
         end
+        return locations if members_by_location.values.compact.empty?
+
+        locations.select { |location| members_by_location[location] == entry.key }
       end
 
       def android_collection_member_at(location, expected_parent)
@@ -57,19 +63,23 @@ module I18nContextGenerator
         return @android_collection_members_by_location[cache_key] if @android_collection_members_by_location&.key?(cache_key)
 
         match = location.match(/\A(.+):(\d+)\z/)
-        member = if match
-                   file = match[1]
-                   target_line = match[2].to_i
-                   scan_android_collection_members(file, target_line, expected_parent) if File.file?(file)
-                 end
+        return unless match
 
+        file = match[1]
+        target_line = match[2].to_i
+        member = scan_android_collection_members(file, target_line, expected_parent) if File.file?(file)
         @android_collection_members_by_location ||= {}
         @android_collection_members_by_location[cache_key] = member
       end
 
       def scan_android_collection_members(file, target_line, expected_parent)
-        content = File.read(file, encoding: 'UTF-8')
-        AndroidResource.index(content).member_at(target_line, parent: expected_parent)
+        android_resource_index(file).member_at(target_line, parent: expected_parent)
+      end
+
+      def android_resource_index(file)
+        @android_resource_indexes_by_file ||= {}
+        @android_resource_indexes_by_file[file] ||=
+          AndroidResource.index(File.read(file, encoding: 'UTF-8'))
       end
 
       def git_diff

@@ -79,8 +79,7 @@ module I18nContextGenerator
         span = resource_index.span_for(key)
         if span
           metadata = metadata.merge(
-            line_span: span.line_span,
-            resource_line_span: span.parent_line_span
+            line_span: span.line_span
           )
         end
         TranslationEntry.new(key: key, text: text, source_file: source_file, metadata: metadata)

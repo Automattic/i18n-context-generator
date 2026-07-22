@@ -227,8 +227,13 @@ module I18nContextGenerator
         content = line.sub(/^[ +-]/, '')
         unless is_removed
           state[:added_file_lines] << state[:file_line] if is_added && state[:file_line]
-          visible_content, = XmlScanner.without_comments(content, state[:xml_comment_state])
-          process_xml_diff_content(state, visible_content, added: is_added)
+          visible_content, contained_comment = XmlScanner.without_comments(content, state[:xml_comment_state])
+          process_xml_diff_content(
+            state,
+            visible_content,
+            added: is_added,
+            contained_comment: contained_comment
+          )
         end
         state[:file_line] += 1 if state[:file_line] && !is_removed
       end
@@ -254,9 +259,10 @@ module I18nContextGenerator
       true
     end
 
-    def process_xml_diff_content(state, content, added:)
-      record_xml_change(state, state[:current_parent]) if added && state[:current_parent]
-      record_xml_change(state, state[:current_string]) if added && state[:current_string]
+    def process_xml_diff_content(state, content, added:, contained_comment: false)
+      meaningful_change = !content.strip.empty? || contained_comment
+      record_xml_change(state, state[:current_parent]) if added && meaningful_change && state[:current_parent]
+      record_xml_change(state, state[:current_string]) if added && meaningful_change && state[:current_string]
 
       accumulate_xml_opening_tag(state, content, added: added)
       complete_xml_opening_tag(state) if state.dig(:pending_tag, :content)&.include?('>')

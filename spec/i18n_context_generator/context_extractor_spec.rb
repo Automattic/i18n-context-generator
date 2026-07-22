@@ -269,6 +269,68 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       end
     end
 
+    it 'prefers an exact Android child over an ambiguous parent location' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+            <plurals name="item_count">
+              <item quantity="one">%d item</item>
+              <item quantity="other">%d items</item>
+            </plurals>
+          </resources>
+        XML
+        entries = I18nContextGenerator::Parsers::AndroidXmlParser.new.parse(path)
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'item_count'] => ["#{path}:2", "#{path}:3"] }
+        )
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        result = extractor.send(:filter_by_diff, entries)
+
+        expect(result.map(&:key)).to eq(['item_count:one'])
+        expect(extractor.send(:changed_translation_locations_for, result.first)).to eq(["#{path}:3"])
+      end
+    end
+
+    it 'indexes each Android translation file once while narrowing collection locations' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+            <plurals name="item_count">
+
+              <item quantity="one">%d item</item>
+              <item quantity="other">%d items</item>
+            </plurals>
+          </resources>
+        XML
+        entries = [
+          build_entry('item_count:one', '%d item', source_file: path, metadata: { plural: 'item_count' }),
+          build_entry('item_count:other', '%d items', source_file: path, metadata: { plural: 'item_count' })
+        ]
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'item_count'] => ["#{path}:2", "#{path}:3"] }
+        )
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+        allow(I18nContextGenerator::AndroidResource).to receive(:index).and_call_original
+
+        extractor.send(:filter_by_diff, entries)
+
+        expect(I18nContextGenerator::AndroidResource).to have_received(:index).once
+      end
+    end
+
     it 'narrows multiline Android array changes to the exact changed index' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')
