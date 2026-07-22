@@ -29,6 +29,8 @@ module I18nContextGenerator
         end
       rescue Psych::SyntaxError => e
         raise Error, "Failed to parse YAML translation file #{path}: #{e.problem} at line #{e.line}, column #{e.column}"
+      rescue Psych::Exception => e
+        raise Error, "Failed to parse YAML translation file #{path}: #{e.message}"
       end
 
       private

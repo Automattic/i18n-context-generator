@@ -86,6 +86,16 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
       end
     end
 
+    it 'wraps unsupported YAML aliases' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'translations.yml')
+        File.write(path, "en: &translations\n  title: Settings\ncopy: *translations\n")
+
+        expect { parser.parse(path) }
+          .to raise_error(I18nContextGenerator::Error, /Failed to parse YAML translation file.*Alias parsing was not enabled/)
+      end
+    end
+
     it 'fails clearly when an explicit locale root is missing' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'translations.yml')

@@ -111,6 +111,10 @@ module I18nContextGenerator
       new(**attrs)
     rescue Psych::SyntaxError => e
       raise Error, "Invalid config YAML #{path}: #{e.problem} at line #{e.line}, column #{e.column}"
+    rescue Psych::Exception => e
+      raise Error, "Invalid config YAML #{path}: #{e.message}"
+    rescue SystemCallError => e
+      raise Error, "Unable to read config #{path}: #{e.message}"
     end
 
     def self.from_cli(options)

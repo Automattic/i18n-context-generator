@@ -222,6 +222,13 @@ RSpec.describe I18nContextGenerator::Config do
         .to raise_error(I18nContextGenerator::Error, /source must be a mapping/)
     end
 
+    it 'wraps unsupported YAML aliases in a configuration error' do
+      File.write(config_path, "defaults: &defaults\n  concurrency: 5\nprocessing: *defaults\n")
+
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /Invalid config YAML.*Alias parsing was not enabled/)
+    end
+
     it 'rejects a non-mapping document root' do
       File.write(config_path, "- invalid\n- root\n")
 
