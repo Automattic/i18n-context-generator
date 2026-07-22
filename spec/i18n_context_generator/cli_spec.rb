@@ -124,6 +124,10 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(sample).to include('- "**/*.generated.*"')
       expect(sample).to include('# - path: config/translations.yml', '#   locale: en')
       expect(sample).to include('# platform: ios')
+      expect(sample).to include('max_prompt_chars: 50000')
+      expect(sample).to include('enabled: false', 'directory: .i18n-context-generator-cache')
+      expect(sample).to include('Best-effort redact likely secrets')
+      expect(sample).to include('Source snippets still leave the machine')
       expect(sample).not_to include('- "**/Pods/**"', '- "**/build/**"', '- "**/*Tests*"')
     end
   end

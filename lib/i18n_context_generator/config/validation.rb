@@ -20,6 +20,7 @@ module I18nContextGenerator
         validate_domains(errors)
         validate_configured_paths(errors)
         validate_output(errors)
+        validate_cache(errors)
         validate_diff_support(errors)
         validate_write_back(errors)
 
@@ -48,6 +49,7 @@ module I18nContextGenerator
         validate_integer(errors, :concurrency, @concurrency, minimum: 1)
         validate_integer(errors, :context_lines, @context_lines, minimum: 0)
         validate_integer(errors, :max_matches_per_key, @max_matches_per_key, minimum: 1)
+        validate_integer(errors, :max_prompt_chars, @max_prompt_chars, minimum: 2_000)
 
         BOOLEAN_OPTIONS.each do |name|
           value = instance_variable_get(:"@#{name}")
@@ -61,6 +63,7 @@ module I18nContextGenerator
           errors << "#{name} must be a non-empty string"
         end
         errors << 'context_prefix must be a string' unless @context_prefix.is_a?(String)
+        errors << 'cache_dir must be a non-empty string' unless @cache_dir.is_a?(String) && !@cache_dir.strip.empty?
       end
 
       def validate_domains(errors)
@@ -117,6 +120,13 @@ module I18nContextGenerator
         elsif File.exist?(@output_path) && !File.writable?(@output_path)
           errors << "output file is not writable: #{@output_path}"
         end
+      end
+
+      def validate_cache(errors)
+        return if @no_cache || !@cache_dir.is_a?(String) || @cache_dir.strip.empty?
+        return unless File.exist?(@cache_dir) && !File.directory?(@cache_dir)
+
+        errors << "cache directory path is not a directory: #{@cache_dir}"
       end
 
       def validate_diff_support(errors)

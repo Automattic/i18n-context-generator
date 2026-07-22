@@ -41,8 +41,12 @@ module I18nContextGenerator
     option :platform, type: :string, enum: %w[ios android],
                       desc: 'Explicit platform override: ios or android'
     option :concurrency, type: :numeric, desc: 'Number of concurrent requests (default: 5)'
+    option :max_prompt_chars, type: :numeric,
+                              desc: 'Maximum characters sent per LLM prompt (default: 50000)'
     option :dry_run, type: :boolean, desc: 'Show what would be processed without calling LLM'
     option :cache, type: :boolean, desc: 'Enable caching of LLM results'
+    option :cache_dir, type: :string,
+                       desc: 'Cache directory (default: .i18n-context-generator-cache)'
     option :write_back, type: :boolean,
                         desc: 'Write context back to source translation files (.strings, strings.xml)'
     option :write_back_to_code, type: :boolean,
@@ -60,7 +64,7 @@ module I18nContextGenerator
     option :include_translation_comments, type: :boolean,
                                           desc: 'Include translation file comments in LLM prompts (default: true)'
     option :redact_prompts, type: :boolean,
-                            desc: 'Redact likely secrets and PII from LLM prompts (default: true)'
+                            desc: 'Best-effort redact likely secrets and PII from LLM prompts (default: true)'
 
     def extract
       validate_options!
@@ -211,6 +215,13 @@ module I18nContextGenerator
           concurrency: 5
           context_lines: 15
           max_matches_per_key: 3
+          # Hard character limit for each prompt; oversized context is truncated
+          max_prompt_chars: 50000
+
+        # Optional local cache. Only successful results are cached.
+        cache:
+          enabled: false
+          directory: .i18n-context-generator-cache
 
         # Output configuration
         output:
@@ -241,7 +252,8 @@ module I18nContextGenerator
           include_file_paths: false
           # Include translation file comments in prompts (default: true)
           include_translation_comments: true
-          # Redact likely secrets, URLs, and emails before sending prompts (default: true)
+          # Best-effort redact likely secrets, URLs, and emails before sending prompts.
+          # Source snippets still leave the machine when using a remote provider.
           redact_prompts: true
       YAML
     end

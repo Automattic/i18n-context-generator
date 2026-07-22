@@ -15,10 +15,12 @@ module I18nContextGenerator
                 :swift_functions, :write_back_to_code, :diff_base, :diff_head, :context_prefix,
                 :context_mode, :start_key, :end_key, :include_file_paths,
                 :include_translation_comments, :redact_prompts, :discovery_mode,
-                :platform, :translation_locales
+                :platform, :translation_locales, :max_prompt_chars, :cache_dir
 
     DEFAULT_CONTEXT_PREFIX = 'Context: '
     DEFAULT_CONTEXT_MODE = 'replace' # "replace" or "append"
+    DEFAULT_MAX_PROMPT_CHARS = 50_000
+    DEFAULT_CACHE_DIR = '.i18n-context-generator-cache'
     VALID_PROVIDERS = %w[anthropic openai].freeze
     VALID_OUTPUT_FORMATS = %w[csv json].freeze
     VALID_CONTEXT_MODES = %w[replace append].freeze
@@ -37,10 +39,12 @@ module I18nContextGenerator
       @concurrency = fetch_defaulting_value(attrs, :concurrency, 5)
       @context_lines = fetch_defaulting_value(attrs, :context_lines, 15)
       @max_matches_per_key = fetch_defaulting_value(attrs, :max_matches_per_key, 3)
+      @max_prompt_chars = fetch_defaulting_value(attrs, :max_prompt_chars, DEFAULT_MAX_PROMPT_CHARS)
       @output_path = fetch_config_value(attrs, :output_path, nil)
       @output_format_explicit = attrs.key?(:output_format) && !attrs[:output_format].nil?
       @output_format = normalize_enum_value(resolve_output_format(attrs[:output_format], @output_path))
       @no_cache = fetch_boolean_value(attrs, :no_cache, true)
+      @cache_dir = fetch_defaulting_value(attrs, :cache_dir, DEFAULT_CACHE_DIR)
       @dry_run = fetch_boolean_value(attrs, :dry_run, false)
       @key_filter = fetch_config_value(attrs, :key_filter, nil)
       @write_back = fetch_boolean_value(attrs, :write_back, false)
@@ -81,6 +85,10 @@ module I18nContextGenerator
       output = config_section(yaml, 'output', path)
       swift = config_section(yaml, 'swift', path)
       privacy = config_section(yaml, 'privacy', path)
+      cache = config_section(yaml, 'cache', path)
+      invalid_cache_enabled = cache.key?('enabled') && ![true, false].include?(cache['enabled'])
+      raise Error, "Invalid config #{path}: cache.enabled must be true or false" if invalid_cache_enabled
+
       translation_settings = parse_translation_settings(yaml['translations'], path: path)
 
       attrs = {
@@ -93,12 +101,15 @@ module I18nContextGenerator
         concurrency: processing.fetch('concurrency', 5),
         context_lines: processing.fetch('context_lines', 15),
         max_matches_per_key: processing.fetch('max_matches_per_key', 3),
+        max_prompt_chars: processing.fetch('max_prompt_chars', DEFAULT_MAX_PROMPT_CHARS),
         discovery_mode: processing.fetch('discovery_mode', 'auto'),
         platform: processing['platform'],
         output_path: output['path'],
         write_back: output.fetch('write_back', false),
         write_back_to_code: output.fetch('write_back_to_code', false),
-        swift_functions: swift.fetch('functions', nil)
+        swift_functions: swift.fetch('functions', nil),
+        no_cache: !cache.fetch('enabled', false),
+        cache_dir: cache.fetch('directory', DEFAULT_CACHE_DIR)
       }
       attrs[:output_format] = output['format'] if output.key?('format')
       attrs[:context_mode] = output['context_mode'] if output.key?('context_mode')
@@ -144,7 +155,6 @@ module I18nContextGenerator
         discovery_mode: options[:discovery_mode] || 'auto',
         platform: options[:platform],
         output_path: options[:output],
-        no_cache: options[:cache].nil? || !options[:cache],
         dry_run: options[:dry_run] || false,
         key_filter: options[:keys],
         write_back: options[:write_back] || false,
@@ -154,6 +164,7 @@ module I18nContextGenerator
         start_key: options[:start_key],
         end_key: options[:end_key]
       }
+      attrs.merge!(cache_cli_attributes(options))
       attrs[:output_format] = options[:format] if options[:format]
 
       # Only include if explicitly provided, so Config.new can apply its defaults
@@ -237,7 +248,15 @@ module I18nContextGenerator
       value
     end
 
-    private_class_method :valid_nonempty_string?, :conflicting_locale?, :config_section
+    def self.cache_cli_attributes(options)
+      {
+        no_cache: options[:cache].nil? || !options[:cache],
+        cache_dir: options[:cache_dir] || DEFAULT_CACHE_DIR,
+        max_prompt_chars: options[:max_prompt_chars] || DEFAULT_MAX_PROMPT_CHARS
+      }
+    end
+
+    private_class_method :valid_nonempty_string?, :conflicting_locale?, :config_section, :cache_cli_attributes
 
     def self.default_ignore_patterns
       [
@@ -286,6 +305,8 @@ module I18nContextGenerator
       scalar_mappings = {
         key_filter: :keys,
         concurrency: :concurrency,
+        max_prompt_chars: :max_prompt_chars,
+        cache_dir: :cache_dir,
         discovery_mode: :discovery_mode,
         platform: :platform,
         diff_base: :diff_base,
