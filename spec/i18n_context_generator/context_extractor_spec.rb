@@ -307,6 +307,69 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       end
     end
 
+    it 'ignores commented-out Android items when resolving an array index' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <string-array name="weekdays">
+                <!-- <item>Ignored example</item> -->
+                <item>Monday</item>
+              </string-array>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'weekdays'] => ["#{path}:4"] }
+        )
+        entries = [
+          build_entry('weekdays[0]', 'Monday', source_file: path, metadata: { array: 'weekdays', index: 0 }),
+          build_entry('weekdays[1]', 'Tuesday', source_file: path, metadata: { array: 'weekdays', index: 1 })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        expect(extractor.send(:filter_by_diff, entries).map(&:key)).to eq(['weekdays[0]'])
+      end
+    end
+
+    it 'keeps all Android children when a changed line contains multiple items' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <string-array name="weekdays">
+                <item>Monday</item><item>Tuesday</item>
+              </string-array>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'weekdays'] => ["#{path}:3"] }
+        )
+        entries = [
+          build_entry('weekdays[0]', 'Monday', source_file: path, metadata: { array: 'weekdays', index: 0 }),
+          build_entry('weekdays[1]', 'Tuesday', source_file: path, metadata: { array: 'weekdays', index: 1 })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        expect(extractor.send(:filter_by_diff, entries).map(&:key)).to eq(%w[weekdays[0] weekdays[1]])
+      end
+    end
+
     it 'returns an empty array when git diff reports no changed keys' do
       config = I18nContextGenerator::Config.new(
         translations: ['Localizable.strings'],
@@ -1038,6 +1101,41 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(llm).to have_received(:generate_context)
       expect(result.description).to eq('Fresh description')
       expect(result.error).to be_nil
+    end
+  end
+
+  describe '#process_entries' do
+    it 'initializes diff-backed source locations before starting worker threads' do
+      main_thread = Thread.current
+      observed_threads = Concurrent::Array.new
+      config = I18nContextGenerator::Config.new(
+        translations: ['Localizable.strings'],
+        source_paths: ['Sources'],
+        diff_base: 'main',
+        concurrency: 3
+      )
+      extractor = described_class.new(config)
+      git_diff = instance_double(I18nContextGenerator::GitDiff)
+      entries = (1..3).map { |index| build_entry("key.#{index}", "Text #{index}") }
+
+      allow(git_diff).to receive(:changed_lines) do
+        observed_threads << Thread.current
+        { 'Sources/View.swift' => Set[10] }
+      end
+      allow(extractor).to receive(:git_diff).and_return(git_diff)
+      allow(extractor).to receive(:process_entry) do |entry|
+        extractor.send(:source_line_filter)
+        I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+          key: entry.key,
+          text: entry.text,
+          description: 'Context'
+        )
+      end
+
+      extractor.send(:process_entries, entries)
+
+      expect(observed_threads).to eq([main_thread])
+      expect(git_diff).to have_received(:changed_lines).once
     end
   end
 

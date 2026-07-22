@@ -176,6 +176,25 @@ RSpec.describe I18nContextGenerator::GitDiff do
         expect(keys).to include('real.key')
         expect(keys.size).to eq(1)
       end
+
+      it 'attributes a comment-only change to the following translation key' do
+        diff = described_class.new(base_ref: 'main')
+
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, 'Localizable.strings')
+          File.write(path, "/* Better context */\n\"save.button\" = \"Save\";\n")
+          diff_output = <<~DIFF
+            @@ -1,2 +1,2 @@
+            -/* Old context */
+            +/* Better context */
+             "save.button" = "Save";
+          DIFF
+
+          locations = diff.send(:extract_strings_key_locations, diff_output, path)
+
+          expect(locations).to eq('save.button' => ["#{path}:1"])
+        end
+      end
     end
 
     context 'with Android XML diff' do
@@ -313,6 +332,44 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
         expect(keys).to include('standalone')
         expect(keys).not_to include('old_plural')
+      end
+
+      it 'attributes a changed translator comment to the following resource' do
+        diff = described_class.new(base_ref: 'main')
+
+        Dir.mktmpdir do |dir|
+          path = File.join(dir, 'strings.xml')
+          File.write(path, <<~XML)
+            <resources>
+              <!-- Better context -->
+              <string name="save_button">Save</string>
+            </resources>
+          XML
+          diff_output = <<~DIFF
+            @@ -1,4 +1,4 @@
+             <resources>
+            -  <!-- Old context -->
+            +  <!-- Better context -->
+               <string name="save_button">Save</string>
+             </resources>
+          DIFF
+
+          locations = diff.send(:extract_xml_key_locations, diff_output, path)
+
+          expect(locations).to eq('save_button' => ["#{path}:2"])
+        end
+      end
+
+      it 'ignores resource-shaped tags inside XML comments' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -1,2 +1,3 @@
+           <resources>
+          +  <!-- Example: <string name="not_a_resource">Ignored</string> -->
+           </resources>
+        DIFF
+
+        expect(diff.send(:extract_xml_keys, diff_output, '/nonexistent')).to be_empty
       end
     end
 

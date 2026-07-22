@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'pathname'
+require_relative '../xml_scanner'
 
 module I18nContextGenerator
   class ContextExtractor
@@ -69,9 +70,12 @@ module I18nContextGenerator
         state = android_collection_scan_state
 
         File.foreach(file).with_index(1) do |line, line_number|
+          line, = XmlScanner.without_comments(line, state[:xml_comment_state])
           track_android_collection_parent(state, line)
+          item_count = line.scan(/<item\b/).size
+          state[:ambiguous_parent] = true if item_count > 1 && state[:parent_name]
           track_android_collection_item(state, line)
-          member = state[:member] if state[:parent_name] == expected_parent
+          member = state[:member] if state[:parent_name] == expected_parent && !state[:ambiguous_parent]
           return member if line_number == target_line
 
           close_android_collection_elements(state, line)
@@ -86,7 +90,9 @@ module I18nContextGenerator
           array_index: -1,
           member: nil,
           pending_parent: nil,
-          pending_item: nil
+          pending_item: nil,
+          ambiguous_parent: false,
+          xml_comment_state: {}
         }
       end
 
@@ -105,6 +111,7 @@ module I18nContextGenerator
           state[:parent_type] = type
           state[:parent_name] = name
           state[:array_index] = -1
+          state[:ambiguous_parent] = false
         end
         state[:pending_parent] = nil
       end
@@ -137,6 +144,7 @@ module I18nContextGenerator
         state[:parent_name] = nil
         state[:parent_type] = nil
         state[:member] = nil
+        state[:ambiguous_parent] = false
       end
 
       def git_diff
