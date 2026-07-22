@@ -212,6 +212,79 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         .to eq(['res/values/strings.xml:4'])
     end
 
+    it 'narrows Android plural changes to the exact changed quantity' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <plurals name="item_count">
+                <item quantity="one">%d item</item>
+                <item quantity="other">%d total items</item>
+              </plurals>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'item_count'] => ["#{path}:4"] }
+        )
+        entries = [
+          build_entry('item_count:one', '%d item', source_file: path, metadata: { plural: 'item_count' }),
+          build_entry('item_count:other', '%d total items', source_file: path, metadata: { plural: 'item_count' })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        result = extractor.send(:filter_by_diff, entries)
+
+        expect(result.map(&:key)).to eq(['item_count:other'])
+        expect(extractor.send(:changed_translation_locations_for, result.first)).to eq(["#{path}:4"])
+      end
+    end
+
+    it 'narrows multiline Android array changes to the exact changed index' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <string-array
+                name="weekdays">
+                <item>Monday</item>
+                <item>
+                  Tuesday
+                </item>
+              </string-array>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'weekdays'] => ["#{path}:6"] }
+        )
+        entries = [
+          build_entry('weekdays[0]', 'Monday', source_file: path, metadata: { array: 'weekdays', index: 0 }),
+          build_entry('weekdays[1]', 'Tuesday', source_file: path, metadata: { array: 'weekdays', index: 1 })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        result = extractor.send(:filter_by_diff, entries)
+
+        expect(result.map(&:key)).to eq(['weekdays[1]'])
+        expect(extractor.send(:changed_translation_locations_for, result.first)).to eq(["#{path}:6"])
+      end
+    end
+
     it 'returns an empty array when git diff reports no changed keys' do
       config = I18nContextGenerator::Config.new(
         translations: ['Localizable.strings'],

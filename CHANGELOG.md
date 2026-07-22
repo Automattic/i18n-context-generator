@@ -18,6 +18,7 @@ _None_
 - Raise actionable errors when Git diff execution fails instead of treating the range as unchanged.
 - Normalize symbol values accepted by the programmatic configuration API.
 - Scope diff-selected duplicate keys to the translation file that changed.
+- Limit changed Android collection entries to the exact plural quantity or array item.
 
 ### Internal Changes
 
