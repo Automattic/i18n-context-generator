@@ -4,7 +4,7 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
   subject(:parser) { described_class.new }
 
   describe '#parse' do
-    it 'strips a top-level locale key and skips nil or blank values' do
+    it 'strips an explicitly configured locale key and skips nil or blank values' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'translations.yml')
         File.write(path, <<~YAML)
@@ -18,7 +18,7 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
             missing:
         YAML
 
-        entries = parser.parse(path)
+        entries = described_class.new(locale: 'pt-BR').parse(path)
 
         expect(entries.map(&:key)).to contain_exactly('auth.title', 'actions')
 
@@ -31,22 +31,15 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
       end
     end
 
-    it 'preserves non-locale top-level namespaces' do
+    it 'preserves top-level namespaces unless a locale is explicitly configured' do
       Dir.mktmpdir do |dir|
-        path = File.join(dir, 'errors.yml')
-        File.write(path, <<~YAML)
-          errors:
-            network: Offline
-        YAML
+        path = File.join(dir, 'translations.yml')
 
-        entries = parser.parse(path)
+        %w[errors app to-do id-card es-419 zh-Hant-TW].each do |namespace|
+          File.write(path, "#{namespace}:\n  title: Example\n")
 
-        expect(entries.map(&:key)).to eq(['errors.network'])
-        expect(entries.first.text).to eq('Offline')
-
-        File.write(path, "app:\n  title: Example\n")
-        app_entries = parser.parse(path)
-        expect(app_entries.map(&:key)).to eq(['app.title'])
+          expect(parser.parse(path).map(&:key)).to eq(["#{namespace}.title"])
+        end
       end
     end
 
@@ -56,17 +49,6 @@ RSpec.describe I18nContextGenerator::Parsers::YamlParser do
         File.write(path, "application:\n  title: My app\n")
 
         entries = described_class.new(locale: 'application').parse(path)
-
-        expect(entries.map(&:key)).to eq(['title'])
-      end
-    end
-
-    it 'recognizes common BCP-47 locale roots' do
-      Dir.mktmpdir do |dir|
-        path = File.join(dir, 'translations.yml')
-        File.write(path, "zh-Hant-TW:\n  title: Settings\n")
-
-        entries = parser.parse(path)
 
         expect(entries.map(&:key)).to eq(['title'])
       end

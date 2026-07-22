@@ -176,7 +176,7 @@ module I18nContextGenerator
           # Android example
           # - path: android/app/src/main/res/values/strings.xml
 
-          # YAML example with an explicit locale root
+          # YAML locale roots are stripped only when configured explicitly
           # - path: config/translations.yml
           #   locale: en
 

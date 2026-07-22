@@ -179,7 +179,15 @@ Run `bundle exec exe/i18n-context-generator help extract` for the full command r
 | `.strings` | Apple strings files |
 | `strings.xml` | Android string resources, including plurals and arrays |
 | `.json` | Nested keys are flattened |
-| `.yml`, `.yaml` | Nested keys are flattened |
+| `.yml`, `.yaml` | Nested keys are flattened; locale roots must be configured explicitly |
+
+For Rails-style YAML files with a locale root, name that root in the translation entry. Without `locale:`, the top-level key is retained as part of every translation key; locale-shaped application namespaces are never guessed or removed.
+
+```yaml
+translations:
+  - path: config/locales/en.yml
+    locale: en
+```
 
 ### Source Search
 
