@@ -6,18 +6,6 @@ module I18nContextGenerator
     class OpenAI < Client
       API_URL = 'https://api.openai.com/v1/responses'
       DEFAULT_MODEL = 'gpt-5-mini'
-      MAX_RETRIES = 2
-      RESPONSE_SCHEMA = {
-        type: 'object',
-        additionalProperties: false,
-        required: %w[description ui_element tone max_length],
-        properties: {
-          description: { type: 'string' },
-          ui_element: { type: %w[string null], enum: %w[button label title alert toast placeholder navigation menu tab error confirmation other] + [nil] },
-          tone: { type: %w[string null], enum: %w[formal casual urgent friendly technical neutral] + [nil] },
-          max_length: { type: %w[integer null] }
-        }
-      }.freeze
 
       def initialize
         super
@@ -28,30 +16,20 @@ module I18nContextGenerator
       end
 
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
-                           include_file_paths: false, redact_prompts: true)
-        model ||= DEFAULT_MODEL
+                           include_file_paths: false, redact_prompts: true,
+                           max_prompt_chars: nil)
+        model = resolved_model(model)
         prompt = build_prompt(
           key: key,
           text: text,
           matches: matches,
           comment: comment,
           include_file_paths: include_file_paths,
-          redact_prompts: redact_prompts
+          redact_prompts: redact_prompts,
+          max_prompt_chars: max_prompt_chars
         )
-        retries = 0
-
-        loop do
-          response = post_request(model: model, prompt: prompt)
-
-          if response.code.to_i == 429 && retries < MAX_RETRIES
-            retries += 1
-            delay = (response['retry-after']&.to_i || 2) * retries
-            sleep(delay)
-            next
-          end
-
-          return handle_response(response)
-        end
+        response = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
+        handle_response(response)
       rescue StandardError => e
         ContextResult.new(description: 'API request failed', error: e.message)
       end
@@ -86,20 +64,41 @@ module I18nContextGenerator
         case response.code.to_i
         when 200
           body = JSON.parse(response.body)
-          parse_response(extract_output_text(body))
-        when 429
-          ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
-        when 401
-          ContextResult.new(description: 'Authentication failed', error: 'Invalid API key')
+          handle_successful_response(body)
         else
-          error_body = begin
-            JSON.parse(response.body)
-          rescue StandardError
-            {}
-          end
-          error_msg = error_body.dig('error', 'message') || error_body['message'] || "HTTP #{response.code}"
-          ContextResult.new(description: 'API error', error: error_msg)
+          http_error_result(response)
         end
+      end
+
+      def handle_successful_response(body)
+        status = body['status']
+        return incomplete_result(body) if status == 'incomplete'
+        return failed_result(body) if status == 'failed'
+        return ContextResult.new(description: 'Incomplete response', error: "Unexpected OpenAI response status: #{status || 'missing'}") unless status == 'completed'
+
+        refusal = extract_refusal(body)
+        return ContextResult.new(description: 'Provider refused request', error: "OpenAI refusal: #{refusal[0, 300]}") if refusal
+
+        parse_response(extract_output_text(body))
+      end
+
+      def incomplete_result(body)
+        reason = body.dig('incomplete_details', 'reason') || 'unknown reason'
+        ContextResult.new(description: 'Incomplete response', error: "OpenAI response incomplete: #{reason}")
+      end
+
+      def failed_result(body)
+        message = body.dig('error', 'message') || 'unknown provider error'
+        ContextResult.new(description: 'API error', error: "OpenAI response failed: #{message.to_s[0, 300]}")
+      end
+
+      def extract_refusal(body)
+        Array(body['output']).each do |output_item|
+          Array(output_item['content']).each do |content_item|
+            return content_item['refusal'].to_s unless content_item['type'] != 'refusal' || content_item['refusal'].to_s.empty?
+          end
+        end
+        nil
       end
 
       def extract_output_text(body)

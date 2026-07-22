@@ -2,7 +2,7 @@
 
 module I18nContextGenerator
   module LLM
-    # Claude API implementation of the LLM client with retry logic for rate limits.
+    # Claude API implementation of the LLM client.
     class Anthropic < Client
       API_URL = 'https://api.anthropic.com/v1/messages'
       ANTHROPIC_VERSION = '2023-06-01'
@@ -16,34 +16,21 @@ module I18nContextGenerator
         @uri = URI(API_URL)
       end
 
-      MAX_RETRIES = 2
-
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
-                           include_file_paths: false, redact_prompts: true)
-        model ||= DEFAULT_MODEL
+                           include_file_paths: false, redact_prompts: true,
+                           max_prompt_chars: nil)
+        model = resolved_model(model)
         prompt = build_prompt(
           key: key,
           text: text,
           matches: matches,
           comment: comment,
           include_file_paths: include_file_paths,
-          redact_prompts: redact_prompts
+          redact_prompts: redact_prompts,
+          max_prompt_chars: max_prompt_chars
         )
-        retries = 0
-
-        loop do
-          response = post_request(model: model, prompt: prompt)
-
-          # Retry on rate limit with backoff
-          if response.code.to_i == 429 && retries < MAX_RETRIES
-            retries += 1
-            delay = (response['retry-after']&.to_i || 2) * retries
-            sleep(delay)
-            next
-          end
-
-          return handle_response(response)
-        end
+        response = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
+        handle_response(response)
       rescue StandardError => e
         ContextResult.new(description: 'API request failed', error: e.message)
       end
@@ -61,7 +48,13 @@ module I18nContextGenerator
             model: model,
             max_tokens: 500,
             system: SYSTEM_PROMPT,
-            messages: [{ role: 'user', content: prompt }]
+            messages: [{ role: 'user', content: prompt }],
+            output_config: {
+              format: {
+                type: 'json_schema',
+                schema: RESPONSE_SCHEMA
+              }
+            }
           }
         )
       end
@@ -70,20 +63,24 @@ module I18nContextGenerator
         case response.code.to_i
         when 200
           body = JSON.parse(response.body)
-          content = body.dig('content', 0, 'text')
-          parse_response(content)
-        when 429
-          ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
-        when 401
-          ContextResult.new(description: 'Authentication failed', error: 'Invalid API key')
+          handle_successful_response(body)
         else
-          error_body = begin
-            JSON.parse(response.body)
-          rescue StandardError
-            {}
-          end
-          error_msg = error_body.dig('error', 'message') || "HTTP #{response.code}"
-          ContextResult.new(description: 'API error', error: error_msg)
+          http_error_result(response)
+        end
+      end
+
+      def handle_successful_response(body)
+        case body['stop_reason']
+        when 'end_turn'
+          content = Array(body['content']).find { |item| item['type'] == 'text' }
+          parse_response(content&.[]('text'))
+        when 'refusal'
+          ContextResult.new(description: 'Provider refused request', error: 'Anthropic refused to generate context')
+        when 'max_tokens'
+          ContextResult.new(description: 'Incomplete response', error: 'Anthropic response reached max_tokens')
+        else
+          reason = body['stop_reason'] || 'missing'
+          ContextResult.new(description: 'Incomplete response', error: "Unexpected Anthropic stop reason: #{reason}")
         end
       end
     end
