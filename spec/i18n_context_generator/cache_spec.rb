@@ -147,6 +147,16 @@ RSpec.describe I18nContextGenerator::Cache do
       expect { cache.clear }.not_to raise_error
     end
 
+    it 'removes legacy MD5 cache entries when clearing after an upgrade' do
+      cache = described_class.new(enabled: true)
+      cache.set('key', 'text', { description: 'current data' })
+      File.write(File.join(cache_dir, "#{'a' * 32}.json"), '{"description":"legacy data"}')
+
+      cache.clear
+
+      expect(File.directory?(cache_dir)).to be false
+    end
+
     it 'preserves unrelated files in a custom cache directory' do
       Dir.mktmpdir do |dir|
         unrelated_path = File.join(dir, 'keep.txt')

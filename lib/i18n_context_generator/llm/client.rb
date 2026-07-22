@@ -10,6 +10,9 @@ require_relative 'request_policy'
 
 module I18nContextGenerator
   module LLM
+    # Raised when local evidence cannot be prepared within prompt constraints.
+    class PromptPreparationError < StandardError; end
+
     # Result from LLM context generation
     ContextResult = Data.define(:description, :ui_element, :tone, :max_length, :error) do
       def initialize(description:, ui_element: nil, tone: nil, max_length: nil, error: nil)
@@ -131,32 +134,58 @@ module I18nContextGenerator
 
       def fit_prompt(evidence, max_prompt_chars)
         valid_limit = max_prompt_chars.is_a?(Integer) && max_prompt_chars >= MIN_MAX_PROMPT_CHARS
-        raise Error, "max_prompt_chars must be an integer greater than or equal to #{MIN_MAX_PROMPT_CHARS}" unless valid_limit
+        unless valid_limit
+          raise PromptPreparationError,
+                "max_prompt_chars must be an integer greater than or equal to #{MIN_MAX_PROMPT_CHARS}"
+        end
 
         prompt = render_prompt(evidence)
         return prompt if prompt.length <= max_prompt_chars
 
         evidence[:truncated_to_max_prompt_chars] = true
-        shrink_usage_fields!(evidence, :context, minimum: 300, max_prompt_chars: max_prompt_chars)
-        shrink_usage_fields!(evidence, :matched_line, minimum: 120, max_prompt_chars: max_prompt_chars)
-        prompt = render_prompt(evidence)
+        prompt = shrink_usage_fields!(evidence, :context, prompt, minimum: 300, max_prompt_chars: max_prompt_chars)
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_usage_fields!(evidence, :matched_line, prompt, minimum: 120, max_prompt_chars: max_prompt_chars)
+        return prompt if prompt.length <= max_prompt_chars
 
         while prompt.length > max_prompt_chars && evidence[:usages].length > 1
           evidence[:usages].pop
           prompt = render_prompt(evidence)
         end
-
-        shrink_optional_field!(evidence, evidence[:translation], :developer_comment, max_prompt_chars, minimum: 0)
-        shrink_optional_field!(evidence, evidence[:translation], :placeholders, max_prompt_chars, minimum: 0)
-        shrink_usage_fields!(evidence, :enclosing_scope, minimum: 0, max_prompt_chars: max_prompt_chars)
-        shrink_usage_fields!(evidence, :location, minimum: 80, max_prompt_chars: max_prompt_chars)
-        shrink_optional_field!(evidence, evidence[:translation], :text, max_prompt_chars, minimum: 160)
-        shrink_optional_field!(evidence, evidence[:translation], :key, max_prompt_chars, minimum: 80)
-
-        prompt = render_prompt(evidence)
         return prompt if prompt.length <= max_prompt_chars
 
-        raise Error, "Prompt cannot fit within max_prompt_chars=#{max_prompt_chars}"
+        prompt = shrink_optional_field!(evidence, evidence[:translation], :developer_comment, prompt, max_prompt_chars,
+                                        minimum: 0)
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_optional_field!(evidence, evidence[:translation], :placeholders, prompt, max_prompt_chars,
+                                        minimum: 0)
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_usage_fields!(
+          evidence, :enclosing_scope, prompt,
+          minimum: 0,
+          max_prompt_chars: max_prompt_chars
+        )
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_usage_fields!(
+          evidence, :location, prompt,
+          minimum: 80,
+          max_prompt_chars: max_prompt_chars
+        )
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_optional_field!(evidence, evidence[:translation], :text, prompt, max_prompt_chars,
+                                        minimum: 160)
+        return prompt if prompt.length <= max_prompt_chars
+
+        prompt = shrink_optional_field!(evidence, evidence[:translation], :key, prompt, max_prompt_chars,
+                                        minimum: 80)
+        return prompt if prompt.length <= max_prompt_chars
+
+        raise PromptPreparationError, "Prompt cannot fit within max_prompt_chars=#{max_prompt_chars}"
       end
 
       def render_prompt(evidence)
@@ -174,23 +203,24 @@ module I18nContextGenerator
         PROMPT
       end
 
-      def shrink_usage_fields!(evidence, field, minimum:, max_prompt_chars:)
+      def shrink_usage_fields!(evidence, field, prompt, minimum:, max_prompt_chars:)
         loop do
-          prompt_length = render_prompt(evidence).length
-          break if prompt_length <= max_prompt_chars
+          break if prompt.length <= max_prompt_chars
 
           usage = evidence[:usages].select { |item| item[field].to_s.length > minimum }.max_by { |item| item[field].length }
           break unless usage
 
-          shrink_value!(usage, field, prompt_length - max_prompt_chars, minimum: minimum)
+          shrink_value!(usage, field, prompt.length - max_prompt_chars, minimum: minimum)
+          prompt = render_prompt(evidence)
         end
+        prompt
       end
 
-      def shrink_optional_field!(evidence, container, field, max_prompt_chars, minimum:)
-        prompt_length = render_prompt(evidence).length
-        return if prompt_length <= max_prompt_chars || container[field].nil?
+      def shrink_optional_field!(evidence, container, field, prompt, max_prompt_chars, minimum:)
+        return prompt if prompt.length <= max_prompt_chars || container[field].nil?
 
-        shrink_value!(container, field, prompt_length - max_prompt_chars, minimum: minimum)
+        shrink_value!(container, field, prompt.length - max_prompt_chars, minimum: minimum)
+        render_prompt(evidence)
       end
 
       def shrink_value!(container, field, overflow, minimum:)

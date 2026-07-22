@@ -18,6 +18,10 @@ RSpec.describe I18nContextGenerator::LLM::Client do
       def request_with_retry_for(uri:, &block)
         send(:request_with_retries, uri: uri, &block)
       end
+
+      def http_error_for(response)
+        send(:http_error_result, response)
+      end
     end
   end
   let(:client) { client_class.new }
@@ -112,6 +116,7 @@ RSpec.describe I18nContextGenerator::LLM::Client do
 
   it 'truncates oversized source context to the configured prompt limit' do
     oversized_match = match.with(context: "before\n#{'source line ' * 2_000}\nafter")
+    allow(client).to receive(:render_prompt).and_call_original
 
     prompt = client.prompt_for(
       key: 'settings.title',
@@ -122,6 +127,7 @@ RSpec.describe I18nContextGenerator::LLM::Client do
 
     expect(prompt.length).to be <= 2_000
     expect(prompt).to include('"truncated_to_max_prompt_chars": true', '[...TRUNCATED...]')
+    expect(client).to have_received(:render_prompt).at_most(3).times
   end
 
   describe '.for' do
@@ -271,12 +277,15 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     success_response = instance_double(Net::HTTPOK, code: '200')
     allow(retry_response).to receive(:[]).with('retry-after').and_return('120')
     allow(client).to receive(:sleep)
+    allow(client).to receive(:reset_http_session)
 
     responses = [retry_response, success_response]
-    result = client.request_with_retry_for(uri: URI('https://api.example.test')) { responses.shift }
+    uri = URI('https://api.example.test')
+    result = client.request_with_retry_for(uri: uri) { responses.shift }
 
     expect(result).to be(success_response)
     expect(client).to have_received(:sleep).with(30.0).once
+    expect(client).to have_received(:reset_http_session).with(uri).once
   end
 
   it 'retries transient network failures and stops after the bounded attempt count' do
@@ -292,5 +301,28 @@ RSpec.describe I18nContextGenerator::LLM::Client do
 
     expect(attempts).to eq(3)
     expect(client).to have_received(:sleep).twice
+  end
+
+  it 'preserves normalized provider details for forbidden responses' do
+    response = instance_double(
+      Net::HTTPForbidden,
+      code: '403',
+      body: { error: { message: 'Model access is not enabled for this project' } }.to_json
+    )
+
+    result = client.http_error_for(response)
+
+    expect(result).to have_attributes(
+      description: 'API error',
+      error: 'Model access is not enabled for this project'
+    )
+  end
+
+  it 'falls back to the HTTP status when a provider error body is nil' do
+    response = instance_double(Net::HTTPInternalServerError, code: '500', body: nil)
+
+    result = client.http_error_for(response)
+
+    expect(result).to have_attributes(description: 'API error', error: 'HTTP 500')
   end
 end

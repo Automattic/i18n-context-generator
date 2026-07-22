@@ -32,7 +32,9 @@ module I18nContextGenerator
           return response unless retryable_response?(response) && retries < MAX_RETRIES
 
           retries += 1
-          sleep(retry_delay(response, retries))
+          delay = retry_delay(response, retries)
+          reset_http_session(uri)
+          sleep(delay)
         rescue *TRANSIENT_NETWORK_ERRORS
           raise if retries >= MAX_RETRIES
 
@@ -69,7 +71,7 @@ module I18nContextGenerator
 
       def http_error_result(response)
         case response.code.to_i
-        when 401, 403
+        when 401
           ContextResult.new(description: 'Authentication failed', error: 'Provider rejected the API credentials')
         when 429
           ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
@@ -86,7 +88,7 @@ module I18nContextGenerator
         return "HTTP #{response.code}" unless message.is_a?(String) && !message.empty?
 
         message.gsub(/[\u0000-\u001F\u007F]/, ' ')[0, 500]
-      rescue JSON::ParserError
+      rescue JSON::ParserError, TypeError
         "HTTP #{response.code}"
       end
 

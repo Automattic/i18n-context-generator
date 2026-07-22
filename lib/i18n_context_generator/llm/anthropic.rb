@@ -31,6 +31,8 @@ module I18nContextGenerator
         )
         response = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
         handle_response(response)
+      rescue PromptPreparationError => e
+        ContextResult.new(description: 'Prompt preparation failed', error: e.message)
       rescue StandardError => e
         ContextResult.new(description: 'API request failed', error: e.message)
       end

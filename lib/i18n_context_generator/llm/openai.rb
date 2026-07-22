@@ -30,6 +30,8 @@ module I18nContextGenerator
         )
         response = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
         handle_response(response)
+      rescue PromptPreparationError => e
+        ContextResult.new(description: 'Prompt preparation failed', error: e.message)
       rescue StandardError => e
         ContextResult.new(description: 'API request failed', error: e.message)
       end
@@ -95,7 +97,10 @@ module I18nContextGenerator
       def extract_refusal(body)
         Array(body['output']).each do |output_item|
           Array(output_item['content']).each do |content_item|
-            return content_item['refusal'].to_s unless content_item['type'] != 'refusal' || content_item['refusal'].to_s.empty?
+            next unless content_item['type'] == 'refusal'
+
+            refusal = content_item['refusal'].to_s
+            return refusal unless refusal.empty?
           end
         end
         nil

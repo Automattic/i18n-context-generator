@@ -74,5 +74,22 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
       expect(refusal).to have_attributes(description: 'Provider refused request', error: /refused/)
       expect(incomplete).to have_attributes(description: 'Incomplete response', error: /max_tokens/)
     end
+
+    it 'reports local prompt preparation failures without making an API request' do
+      allow(client).to receive(:post_json)
+
+      result = client.generate_context(
+        key: 'common.save',
+        text: 'Save',
+        matches: [],
+        max_prompt_chars: 1_999
+      )
+
+      expect(result).to have_attributes(
+        description: 'Prompt preparation failed',
+        error: /max_prompt_chars must be an integer/
+      )
+      expect(client).not_to have_received(:post_json)
+    end
   end
 end

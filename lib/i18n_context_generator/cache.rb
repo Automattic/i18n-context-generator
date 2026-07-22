@@ -46,7 +46,7 @@ module I18nContextGenerator
     def clear
       return unless File.directory?(@directory)
 
-      Dir.children(@directory).grep(/\A(?:[a-f0-9]{64}\.json|context-cache-.*\.tmp)\z/).each do |filename|
+      Dir.children(@directory).grep(/\A(?:[a-f0-9]{32}(?:[a-f0-9]{32})?\.json|context-cache-.*\.tmp)\z/).each do |filename|
         FileUtils.rm_f(File.join(@directory, filename))
       end
       Dir.rmdir(@directory) if safe_to_remove_empty_directory? && Dir.empty?(@directory)
