@@ -61,7 +61,7 @@ module I18nContextGenerator
         end
 
         if updated && content != original_content
-          File.write(path, content)
+          AtomicFile.replace(path, content)
           true
         else
           false

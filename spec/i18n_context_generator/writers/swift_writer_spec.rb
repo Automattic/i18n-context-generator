@@ -8,6 +8,20 @@ RSpec.describe I18nContextGenerator::Writers::SwiftWriter do
   end
 
   describe '#update_file' do
+    it 'preserves the source file permissions' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'View.swift')
+        File.write(path, 'let title = NSLocalizedString("title", comment: "")')
+        File.chmod(0o640, path)
+
+        writer = described_class.new
+        results = { 'title' => build_result('title', 'Screen title') }
+
+        expect(writer.update_file(path, results)).to be true
+        expect(File.stat(path).mode & 0o777).to eq(0o640)
+      end
+    end
+
     it 'updates NSLocalizedString comment parameter' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'Test.swift')

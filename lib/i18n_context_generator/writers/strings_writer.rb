@@ -43,8 +43,9 @@ module I18nContextGenerator
           new_file << new_item
         end
 
-        # Write back to file
-        File.write(source_path, new_file.to_s)
+        AtomicFile.replace(source_path, new_file.to_s) do |candidate_path|
+          DotStrings.parse_file(candidate_path, strict: true)
+        end
       end
 
       private

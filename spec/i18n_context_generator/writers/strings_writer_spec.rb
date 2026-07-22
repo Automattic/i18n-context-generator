@@ -128,5 +128,17 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
         expect(parsed_comments(spanish_path)['greeting']).to eq('Context: Spanish context')
       end
     end
+
+    it 'preserves the source file permissions' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, '"settings.title" = "Settings";')
+        File.chmod(0o640, path)
+
+        described_class.new.write([build_result('settings.title', 'Settings screen title')], path)
+
+        expect(File.stat(path).mode & 0o777).to eq(0o640)
+      end
+    end
   end
 end
