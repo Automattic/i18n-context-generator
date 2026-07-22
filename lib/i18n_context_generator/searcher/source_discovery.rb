@@ -98,7 +98,7 @@ module I18nContextGenerator
         when '.kt', '.java'
           :android
         when '.xml'
-          file.include?('/res/') ? :android : nil
+          file.split(File::SEPARATOR).include?('res') ? :android : nil
         end
       end
 

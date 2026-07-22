@@ -410,6 +410,22 @@ RSpec.describe I18nContextGenerator::Searcher do
         expect(entries.map(&:key)).not_to include('key_name')
       end
 
+      it 'discovers XML references when the relative source root is res' do
+        Dir.mktmpdir do |dir|
+          Dir.chdir(dir) do
+            FileUtils.mkdir_p('res/layout')
+            File.write('res/layout/screen.xml', '<TextView android:text="@string/relative_res_title" />')
+            relative_searcher = described_class.new(source_paths: ['res'], ignore_patterns: [])
+
+            entries = relative_searcher.discover_localization_entries
+
+            expect(entries).to contain_exactly(
+              have_attributes(key: 'relative_res_title', file: 'res/layout/screen.xml')
+            )
+          end
+        end
+      end
+
       it 'discovers and searches Android array references' do
         Dir.mktmpdir do |dir|
           file = File.join(dir, 'Arrays.kt')
