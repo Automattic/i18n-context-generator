@@ -229,7 +229,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         .to eq(['res/values/strings.xml:4'])
     end
 
-    it 'narrows Android plural changes to the exact changed quantity' do
+    it 'narrows Android plural changes without rescanning the changed location' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')
         File.write(
@@ -256,11 +256,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
         allow(I18nContextGenerator::GitDiff).to receive(:new)
           .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+        allow(extractor).to receive(:scan_android_collection_members).and_call_original
 
         result = extractor.send(:filter_by_diff, entries)
+        changed_locations = extractor.send(:changed_translation_locations_for, result.first)
 
-        expect(result.map(&:key)).to eq(['item_count:other'])
-        expect(extractor.send(:changed_translation_locations_for, result.first)).to eq(["#{path}:4"])
+        expect([result.map(&:key), changed_locations]).to eq([['item_count:other'], ["#{path}:4"]])
+        expect(extractor).to have_received(:scan_android_collection_members).once
       end
     end
 
@@ -422,6 +424,25 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
         expect { extractor.run }
           .to output("No changed source localization entries found in origin/main...HEAD.\n").to_stdout
+      end
+    end
+
+    it 'prints one message when translation diff filtering finds no entries' do
+      Dir.mktmpdir do |dir|
+        translation_path = File.join(dir, 'Localizable.strings')
+        File.write(translation_path, "\"settings.title\" = \"Settings\";\n")
+        config = I18nContextGenerator::Config.new(
+          translations: [translation_path],
+          diff_base: 'origin/main'
+        )
+        extractor = described_class.new(config)
+        git_diff = instance_double(I18nContextGenerator::GitDiff, changed_key_locations: {})
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
+
+        expect { extractor.run }
+          .to output("No changed translation keys found in origin/main...HEAD.\n").to_stdout
       end
     end
   end

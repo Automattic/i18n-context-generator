@@ -39,10 +39,11 @@ _None_
 - Limit changed Android collection entries to the exact plural quantity or array item.
 - Track complete multiline iOS localization calls so comment-only changes remain discoverable.
 - Expose machine-readable extraction result status instead of requiring consumers to match placeholder text.
+- Avoid duplicate no-change messages for translation diff runs.
 
 ### Internal Changes
 
-_None_
+- Cache Android collection member resolution per changed location during diff filtering.
 
 ## 0.4.0
 

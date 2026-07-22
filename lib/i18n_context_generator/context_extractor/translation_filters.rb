@@ -9,12 +9,10 @@ module I18nContextGenerator
       private
 
       def filter_by_diff(entries)
+        @android_collection_members_by_location = {}
         @changed_translation_locations = git_diff.changed_key_locations(@config.translations)
 
-        if @changed_translation_locations.empty?
-          puts "No changes detected in translation files for #{@config.diff_base}...#{@config.diff_head}"
-          return []
-        end
+        return [] if @changed_translation_locations.empty?
 
         puts "Found #{@changed_translation_locations.size} changed translation entries in git diff"
 
@@ -53,14 +51,18 @@ module I18nContextGenerator
       end
 
       def android_collection_member_at(location, expected_parent)
+        cache_key = [expected_parent, location]
+        return @android_collection_members_by_location[cache_key] if @android_collection_members_by_location&.key?(cache_key)
+
         match = location.match(/\A(.+):(\d+)\z/)
-        return unless match
+        member = if match
+                   file = match[1]
+                   target_line = match[2].to_i
+                   scan_android_collection_members(file, target_line, expected_parent) if File.file?(file)
+                 end
 
-        file = match[1]
-        target_line = match[2].to_i
-        return unless File.file?(file)
-
-        scan_android_collection_members(file, target_line, expected_parent)
+        @android_collection_members_by_location ||= {}
+        @android_collection_members_by_location[cache_key] = member
       end
 
       def scan_android_collection_members(file, target_line, expected_parent)
