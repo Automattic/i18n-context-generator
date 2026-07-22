@@ -80,6 +80,22 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
+
+        it 'does not treat a plain multiline String initializer as localization' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'PlainString.swift')
+            File.write(file, <<~SWIFT)
+              let value = String(
+                "not.localization"
+              )
+            SWIFT
+            plain_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(plain_searcher.search('not.localization')).to be_empty
+          end
+        end
       end
 
       context 'with LocalizedStringKey pattern' do
@@ -125,6 +141,19 @@ RSpec.describe I18nContextGenerator::Searcher do
 
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('QuickStartView.swift') }).to be true
+        end
+
+        it 'does not treat Text(verbatim:) as localization' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'VerbatimText.swift')
+            File.write(file, 'Text(verbatim: "not.localization")')
+            verbatim_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(verbatim_searcher.search('not.localization')).to be_empty
+            expect(verbatim_searcher.discover_localization_entries).to be_empty
+          end
         end
       end
 
@@ -269,6 +298,45 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(custom_searcher.search('custom.title').map(&:file)).to eq([file])
           expect(custom_searcher.discover_localization_entries).to contain_exactly(
             have_attributes(key: 'custom.title', comment: 'Custom screen title')
+          )
+        end
+      end
+
+      it 'accepts a label before the first string argument of a custom function' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'LabeledCustomLocalization.swift')
+          File.write(file, 'let title = MyLocalizedString(key: "custom.title", comment: "Custom title")')
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString']
+          )
+
+          expect(custom_searcher.search('custom.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries).to include(
+            have_attributes(key: 'custom.title', comment: 'Custom title')
+          )
+        end
+      end
+
+      it 'retains built-in search and discovery when a custom function is configured' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'DefaultAndCustomLocalization.swift')
+          File.write(file, <<~SWIFT)
+            Text("default.title", comment: "Default title")
+            MyLocalizedString("custom.title", comment: "Custom title")
+          SWIFT
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString']
+          )
+
+          expect(custom_searcher.search('default.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries.map(&:key)).to contain_exactly(
+            'default.title', 'custom.title'
           )
         end
       end

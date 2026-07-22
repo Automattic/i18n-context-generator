@@ -255,21 +255,23 @@ module I18nContextGenerator
     # e.g., NSLocalizedString(\n    "key",\n    comment: "...")
     def find_multiline_ios_matches(lines, patterns, key)
       key_pattern = /["']#{Regexp.escape(key)}["']/
+      call_patterns = @localization_syntax.ios_multiline_search_patterns(key)
 
       lines.each_with_index.filter_map do |line, index|
         next if patterns.any? { |p| p.match?(line) }  # Already a single-line match
         next unless key_pattern.match?(line)          # Doesn't contain the key
 
-        index if preceded_by_localization_opener?(lines, index)
+        index if preceded_by_localization_call?(lines, index, call_patterns)
       end.to_set
     end
 
-    def preceded_by_localization_opener?(lines, index, lookback: 5)
+    def preceded_by_localization_call?(lines, index, patterns, lookback: 5)
       start_idx = [0, index - lookback].max
 
       (start_idx...index).reverse_each do |i|
         line = lines[i]
-        return true if @localization_syntax.ios_function_openers.any? { |opener| opener.match?(line) }
+        snippet = lines[i..index].join("\n")
+        return true if patterns.any? { |pattern| pattern.match?(snippet) }
         return false if line =~ /;\s*$/ || line =~ /\)\s*$/ # Hit a statement boundary
       end
 

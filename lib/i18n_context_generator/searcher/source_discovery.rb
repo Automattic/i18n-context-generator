@@ -90,8 +90,6 @@ module I18nContextGenerator
           return [index + 1, entry]
         end
 
-        return extract_ios_multiline_entry(lines, file, index) if @localization_syntax.ios_function_openers.any? { |opener| opener.match?(line) }
-
         [index + 1, nil]
       end
 

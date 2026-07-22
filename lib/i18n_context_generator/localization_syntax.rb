@@ -25,8 +25,11 @@ module I18nContextGenerator
     ].freeze
 
     IOS_STATIC_MULTILINE_DISCOVERY_PATTERNS = [
-      /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)\s*\)/
+      /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)[\s\S]*?\)/
     ].freeze
+
+    OPTIONAL_ARGUMENT_LABEL_PATTERN = '(?:[A-Za-z_]\w*\s*:\s*)?'
+    private_constant :OPTIONAL_ARGUMENT_LABEL_PATTERN
 
     ANDROID_DISCOVERY_PATTERNS = {
       string: %r{R\.string\.(\w+)\b|@string/([\w.]+)\b|[(\s,=]string\.(\w+)\b}x,
@@ -34,8 +37,13 @@ module I18nContextGenerator
       array: %r{R\.array\.(\w+)\b|@array/([\w.]+)\b|[(\s,=]array\.(\w+)\b}x
     }.freeze
 
+    def self.functions_with_defaults(functions)
+      configured = Array(functions).map(&:strip).reject(&:empty?)
+      (DEFAULT_SWIFT_FUNCTIONS + configured).uniq { |function| function.sub(/\(\s*\z/, '') }.freeze
+    end
+
     def initialize(swift_functions: nil)
-      @swift_functions = Array(swift_functions || DEFAULT_SWIFT_FUNCTIONS).map(&:strip).reject(&:empty?).uniq.freeze
+      @swift_functions = self.class.functions_with_defaults(swift_functions)
     end
 
     attr_reader :swift_functions
@@ -53,10 +61,13 @@ module I18nContextGenerator
 
     def ios_search_patterns(key)
       escaped_key = Regexp.escape(key)
-      function_patterns = @swift_functions.map do |function|
-        "#{swift_call_prefix(function)}\\s*@?[\"']#{escaped_key}[\"']"
-      end
+      function_patterns = swift_function_key_patterns(escaped_key)
       function_patterns + IOS_STATIC_SEARCH_BUILDERS.map { |builder| builder.call(escaped_key) }
+    end
+
+    def ios_multiline_search_patterns(key)
+      escaped_key = Regexp.escape(key)
+      swift_function_key_patterns(escaped_key).map { |pattern| Regexp.new(pattern) }
     end
 
     def android_search_patterns(key, resource_type: nil)
@@ -85,18 +96,6 @@ module I18nContextGenerator
         @swift_functions.map { |function| Regexp.new(swift_function_opener(function)) }.freeze
     end
 
-    def ios_function_openers
-      @ios_function_openers ||= begin
-        configured = @swift_functions.flat_map do |function|
-          [
-            Regexp.new("#{swift_function_opener(function)}\\s*$"),
-            Regexp.new("#{swift_call_prefix(function)}\\s*$")
-          ]
-        end
-        (configured.uniq + [/LocalizedStringKey\s*\(\s*$/]).freeze
-      end
-    end
-
     def ios_wrapper_definition_pattern
       @ios_wrapper_definition_pattern ||= begin
         functions = (@swift_functions.map { |function| swift_call_prefix(function) } +
@@ -113,12 +112,14 @@ module I18nContextGenerator
       escaped_key = Regexp.escape(key)
       comment = 'comment:\\s*"(?:\\\\.|[^"\\\\])*"'
 
-      @swift_functions.map do |function|
+      patterns = @swift_functions.map do |function|
         Regexp.new(
-          "#{swift_call_prefix(function)}[^)]*\"#{escaped_key}\"[^)]*#{comment}[^)]*\\)",
+          "#{swift_key_argument_prefix(function)}\"#{escaped_key}\"[^)]*#{comment}[^)]*\\)",
           Regexp::MULTILINE
         )
       end
+      patterns << nested_text_writer_pattern(escaped_key, comment)
+      patterns
     end
 
     private
@@ -126,12 +127,25 @@ module I18nContextGenerator
     def function_discovery_patterns(multiline:)
       tail = multiline ? '[\\s\\S]*?' : '[^\\n]*?'
       @swift_functions.flat_map do |function|
-        prefix = swift_call_prefix(function)
+        prefix = swift_key_argument_prefix(function)
         [
           Regexp.new("#{prefix}\\s*@?[\"'](?<key>[^\"']+)[\"']#{tail}comment:\\s*[\"'](?<comment>(?:\\\\.|[^\"'\\\\])*)[\"']"),
           Regexp.new("#{prefix}\\s*@?[\"'](?<key>[^\"']+)[\"']")
         ]
       end
+    end
+
+    def swift_function_key_patterns(escaped_key)
+      @swift_functions.map do |function|
+        "#{swift_key_argument_prefix(function)}@?[\"']#{escaped_key}[\"']"
+      end
+    end
+
+    def swift_key_argument_prefix(function)
+      prefix = swift_call_prefix(function)
+      return "#{prefix}\\s*" if explicit_argument_fragment?(function) || DEFAULT_SWIFT_FUNCTIONS.include?(function)
+
+      "#{prefix}\\s*#{OPTIONAL_ARGUMENT_LABEL_PATTERN}"
     end
 
     def swift_call_prefix(function)
@@ -146,6 +160,19 @@ module I18nContextGenerator
     def swift_function_opener(function)
       name = function.split('(', 2).first
       "#{Regexp.escape(name.strip)}\\s*\\("
+    end
+
+    def explicit_argument_fragment?(function)
+      _name, arguments = function.split('(', 2)
+      arguments && !arguments.strip.empty?
+    end
+
+    def nested_text_writer_pattern(escaped_key, comment)
+      Regexp.new(
+        "Text\\s*\\(\\s*LocalizedStringKey\\s*\\(\\s*\"#{escaped_key}\"\\s*\\)" \
+        "[^)]*#{comment}[^)]*\\)",
+        Regexp::MULTILINE
+      )
     end
 
     def android_plural_patterns(key)
