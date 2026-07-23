@@ -1204,11 +1204,15 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
     it 'loads supplemental context once, forwards it, and caches only content digests' do
       Dir.mktmpdir do |dir|
         glossary = File.join(dir, 'GLOSSARY.md')
-        File.write(glossary, "# Reader\nProduct terminology")
+        glossary_content = "# Reader\nProduct terminology"
+        pull_request_title = 'Clarify Reader labels'
+        glossary_digest = Digest::SHA256.hexdigest(glossary_content)
+        pull_request_digest = Digest::SHA256.hexdigest(pull_request_title)
+        File.write(glossary, glossary_content)
         context_config = I18nContextGenerator::Config.new(
           translations: [],
           context_files: [glossary],
-          supplemental_context: { 'Pull request title' => 'Clarify Reader labels' }
+          supplemental_context: { 'Pull request title' => pull_request_title }
         )
         context_extractor = described_class.new(context_config)
         searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
@@ -1223,6 +1227,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
         )
         allow(File).to receive(:binread).and_call_original
+        digested_contents = []
+        allow(Digest::SHA256).to receive(:hexdigest).and_wrap_original do |method, content|
+          digested_contents << content
+          method.call(content)
+        end
         allow(context_extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
 
         2.times { context_extractor.send(:process_entry, entry) }
@@ -1242,15 +1251,16 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
             {
               'kind' => 'file',
               'name' => 'GLOSSARY.md',
-              'sha256' => Digest::SHA256.hexdigest("# Reader\nProduct terminology")
+              'sha256' => glossary_digest
             },
             {
               'kind' => 'runtime',
               'name' => 'Pull request title',
-              'sha256' => Digest::SHA256.hexdigest('Clarify Reader labels')
+              'sha256' => pull_request_digest
             }
           ]
         )
+        expect(digested_contents).to eq([glossary_content, pull_request_title])
         expect(cache_contexts).to all(
           satisfy do |context|
             !context.include?('Product terminology') && !context.include?('Clarify Reader labels')

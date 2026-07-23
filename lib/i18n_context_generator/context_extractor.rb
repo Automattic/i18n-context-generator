@@ -39,6 +39,7 @@ module I18nContextGenerator
       @llm = nil
       @cache = nil
       @supplemental_context = nil
+      @cache_context_sources = nil
     end
 
     def run
@@ -59,10 +60,10 @@ module I18nContextGenerator
 
       return if pre_extraction_stage_handled?(entries)
 
-      # Provider construction validates credentials. Resolve it once on the
-      # caller thread so a configuration error is reported once instead of
-      # being duplicated by every worker.
-      supplemental_context
+      # Resolve shared prompt inputs and provider state on the caller thread so
+      # file reads, digest work, and configuration errors are not duplicated by workers.
+      context_sources = supplemental_context
+      cache_context_sources(context_sources)
       llm
       process_entries(entries)
       @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)

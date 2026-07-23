@@ -22,13 +22,13 @@ module I18nContextGenerator
       end
 
       def cache_context_sources(sources)
-        sources.map do |source|
+        @cache_context_sources ||= sources.map do |source|
           {
             kind: source.kind,
             name: source.name,
             sha256: Digest::SHA256.hexdigest(source.content)
-          }
-        end
+          }.freeze
+        end.freeze
       end
 
       def sorted_cache_matches(matches)
