@@ -23,6 +23,11 @@ RSpec.describe I18nContextGenerator::Parsers::Base do
       expect(described_class.for('ios/Localizable.strings')).to be_a(I18nContextGenerator::Parsers::StringsParser)
     end
 
+    it 'selects the string-catalog parser for .xcstrings files' do
+      expect(described_class.for('ios/Localizable.xcstrings'))
+        .to be_a(I18nContextGenerator::Parsers::XcstringsParser)
+    end
+
     it 'selects the Android XML parser for strings.xml files' do
       expect(described_class.for('android/res/values/strings.xml')).to be_a(I18nContextGenerator::Parsers::AndroidXmlParser)
     end

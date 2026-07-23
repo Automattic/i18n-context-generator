@@ -36,6 +36,8 @@ module I18nContextGenerator
         key_locations = case File.extname(path).downcase
                         when '.strings'
                           extract_strings_key_locations(diff_output, normalized_path)
+                        when '.xcstrings'
+                          extract_xcstrings_key_locations(diff_output, normalized_path)
                         when '.xml'
                           extract_xml_key_locations(diff_output, normalized_path)
                         else
@@ -148,6 +150,8 @@ module I18nContextGenerator
       case ext
       when '.strings'
         extract_strings_keys(diff_output)
+      when '.xcstrings'
+        extract_xcstrings_key_locations(diff_output, path).keys.to_set
       when '.xml'
         extract_xml_keys(diff_output, path)
       else
@@ -187,6 +191,57 @@ module I18nContextGenerator
       end
 
       locations
+    end
+
+    def extract_xcstrings_key_locations(diff_output, file_path)
+      index = xcstrings_line_index(file_path)
+      locations = Hash.new { |hash, key| hash[key] = [] }
+      new_line_number = nil
+
+      diff_output.each_line do |line|
+        if (match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          new_line_number = match[1].to_i
+          next
+        end
+        next if new_line_number.nil?
+        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
+
+        if line.start_with?('+', '-')
+          key = index[new_line_number]
+          locations[key] << "#{file_path}:#{new_line_number}" if key && !line[1..].strip.empty?
+          new_line_number += 1 if line.start_with?('+')
+        else
+          new_line_number += 1
+        end
+      end
+
+      locations.transform_values(&:uniq)
+    end
+
+    def xcstrings_line_index(file_path)
+      catalog = Oj.load_file(file_path, mode: :strict)
+      keys = catalog.fetch('strings').keys
+      encoded_keys = keys.to_h { |key| [JSON.generate(key), key] }
+      lines = File.readlines(file_path, chomp: true)
+      candidates = lines.each_with_index.filter_map do |line, index|
+        match = line.match(/\A(?<indent>\s*)(?<key>"(?:\\.|[^"])*")\s*:\s*\{/)
+        key = encoded_keys[match&.[](:key)]
+        [index + 1, match[:indent].length, key] if key
+      end
+      return {} if candidates.empty?
+
+      entry_indent = candidates.map { |(_line, indent, _key)| indent }.min
+      starts = candidates.select { |(_line, indent, _key)| indent == entry_indent }
+      catalog_end = lines.each_with_index.drop(starts.last.first).find do |line, _index|
+        indentation = line[/\A\s*/].length
+        line.strip.start_with?('}') && indentation < entry_indent
+      end&.last&.+(1) || (lines.length + 1)
+      starts.each_with_index.with_object({}) do |((start_line, _indent, key), index), line_index|
+        next_line = starts[index + 1]&.first || catalog_end
+        (start_line...next_line).each { |line_number| line_index[line_number] = key }
+      end
+    rescue Oj::ParseError, KeyError, TypeError => e
+      raise Error, "Failed to index Apple string catalog #{file_path}: #{e.message}"
     end
 
     # Extract keys from Android strings.xml diff.

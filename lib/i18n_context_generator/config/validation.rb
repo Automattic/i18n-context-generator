@@ -9,12 +9,12 @@ module I18nContextGenerator
     module Validation
       BOOLEAN_OPTIONS = %i[
         no_cache dry_run write_back write_back_to_code include_file_paths
-        include_translation_comments redact_prompts
+        include_translation_comments redact_prompts output_stdout print_config
       ].freeze
       OPTIONAL_STRING_OPTIONS = %i[
         model endpoint output_path key_filter diff_base diff_head start_key end_key platform
       ].freeze
-      TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xml].freeze
+      TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xcstrings .xml].freeze
 
       def validate!
         errors = []
@@ -71,11 +71,15 @@ module I18nContextGenerator
       end
 
       def validate_domains(errors)
+        errors << "schema_version must be #{Schema::VERSION}" unless @schema_version == Schema::VERSION
         validate_inclusion(errors, :provider, @provider, VALID_PROVIDERS)
         validate_inclusion(errors, :output_format, @output_format, VALID_OUTPUT_FORMATS)
         validate_inclusion(errors, :context_mode, @context_mode, VALID_CONTEXT_MODES)
         validate_inclusion(errors, :discovery_mode, @discovery_mode, VALID_DISCOVERY_MODES)
+        validate_inclusion(errors, :workflow_stage, @workflow_stage, Schema.values(:workflow_stage))
         validate_inclusion(errors, :platform, @platform, VALID_PLATFORMS) unless @platform.nil?
+        errors << 'preview_diff requires write_back or write_back_to_code' if @workflow_stage == 'preview_diff' && !@write_back && !@write_back_to_code
+        errors << 'preview_diff cannot use structured stdout' if @workflow_stage == 'preview_diff' && @output_stdout
       end
 
       def validate_provider_endpoint(errors)
@@ -130,6 +134,8 @@ module I18nContextGenerator
       end
 
       def validate_output(errors)
+        errors << 'output.path and output.stdout cannot both be configured' if @output_destination_conflict
+        return if @output_stdout
         return unless @output_path.is_a?(String)
 
         extension = File.extname(@output_path).downcase

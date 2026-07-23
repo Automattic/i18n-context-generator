@@ -12,33 +12,37 @@ module I18nContextGenerator
       DANGEROUS_CSV_PREFIX = /\A[ \t\r\n]*[=+\-@]/
 
       def write(results, path, **_options)
-        CSV.open(path, 'w') do |csv|
-          csv << HEADERS
+        return write_rows(CSV.new($stdout), results) if path == '-'
 
-          results.sort_by(&:key).each do |result|
-            csv << [
-              sanitize_cell(result.key),
-              sanitize_cell(result.text),
-              sanitize_cell(result.description),
-              sanitize_cell(result.ui_element),
-              sanitize_cell(result.tone),
-              result.max_length,
-              sanitize_cell(result.confidence),
-              sanitize_cell(result.ambiguity_reason),
-              sanitize_cell(result.locations.join(';')),
-              result.status,
-              result.cache_hit,
-              result.request_count,
-              result.input_tokens,
-              result.output_tokens,
-              result.retries,
-              sanitize_cell(result.error)
-            ]
-          end
-        end
+        CSV.open(path, 'w') { |csv| write_rows(csv, results) }
       end
 
       private
+
+      def write_rows(csv, results)
+        csv << HEADERS
+
+        results.sort_by(&:key).each do |result|
+          csv << [
+            sanitize_cell(result.key),
+            sanitize_cell(result.text),
+            sanitize_cell(result.description),
+            sanitize_cell(result.ui_element),
+            sanitize_cell(result.tone),
+            result.max_length,
+            sanitize_cell(result.confidence),
+            sanitize_cell(result.ambiguity_reason),
+            sanitize_cell(result.locations.join(';')),
+            result.status,
+            result.cache_hit,
+            result.request_count,
+            result.input_tokens,
+            result.output_tokens,
+            result.retries,
+            sanitize_cell(result.error)
+          ]
+        end
+      end
 
       def sanitize_cell(value)
         return value unless value.is_a?(String)

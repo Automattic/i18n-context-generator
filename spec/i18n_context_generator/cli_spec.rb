@@ -22,7 +22,22 @@ RSpec.describe I18nContextGenerator::CLI do
 
     provider_option = described_class.commands.fetch('extract').options.fetch(:provider)
 
-    expect(provider_option.enum).to eq(%w[anthropic openai])
+    expect(provider_option.enum).to eq(%w[anthropic openai openai_compatible])
+  end
+
+  it 'exposes repeatable singular translation, source, and key options' do
+    options = described_class.commands.fetch('extract').options
+
+    expect(options.fetch(:translation).repeatable).to be(true)
+    expect(options.fetch(:source).repeatable).to be(true)
+    expect(options.fetch(:key).repeatable).to be(true)
+    expect(options.fetch(:translation).aliases).to include('-t')
+    expect(options.fetch(:key).aliases).to include('-k')
+  end
+
+  it 'registers explicit check, plan, preview-diff, and apply workflows' do
+    expect(described_class.commands.keys).to include('check', 'plan', 'preview_diff', 'apply')
+    expect(described_class.map['preview-diff']).to eq(:preview_diff)
   end
 
   describe 'option validation' do
@@ -59,7 +74,29 @@ RSpec.describe I18nContextGenerator::CLI do
       allow(cli).to receive(:options).and_return(config: nil, translations: nil)
 
       expect { cli.send(:validate_options!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
-      expect(cli).to have_received(:say_error).with(/--translations \(-t\) is required/)
+      expect(cli).to have_received(:say_error).with(/--translation \(-t\) is required/)
+    end
+  end
+
+  describe 'list deprecations' do
+    let(:cli) { described_class.allocate }
+
+    before do
+      allow(cli).to receive(:say_error)
+    end
+
+    it 'warns for legacy plural flags and comma-separated repeatable values' do
+      allow(cli).to receive(:options).and_return(
+        translations: 'One.strings,Two.strings',
+        keys: 'settings.*,profile.*',
+        source: ['Sources,Shared']
+      )
+
+      cli.send(:warn_deprecated_list_options!)
+
+      expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
+      expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
+      expect(cli).to have_received(:say_error).with(/comma-separated CLI lists are deprecated/)
     end
   end
 
@@ -83,6 +120,17 @@ RSpec.describe I18nContextGenerator::CLI do
 
         expect { cli.send(:validate_api_key!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
         expect(cli).to have_received(:say_error).with(/OPENAI_API_KEY environment variable is required/)
+      end
+    end
+
+    it 'does not forward or require the OpenAI key for compatible endpoints' do
+      with_env('OPENAI_API_KEY', nil) do
+        allow(cli).to receive(:options).and_return(
+          dry_run: false,
+          provider: 'openai_compatible'
+        )
+
+        expect { cli.send(:validate_api_key!) }.not_to raise_error
       end
     end
   end
@@ -137,6 +185,7 @@ RSpec.describe I18nContextGenerator::CLI do
       schema = I18nContextGenerator::Config::Schema
 
       expect(parsed.dig('llm', 'provider')).to eq(schema.default(:provider))
+      expect(parsed['schema_version']).to eq(schema.default(:schema_version))
       expect(parsed.dig('processing', 'concurrency')).to eq(schema.default(:concurrency))
       expect(parsed.dig('processing', 'max_prompt_chars')).to eq(schema.default(:max_prompt_chars))
       expect(parsed.dig('cache', 'enabled')).to eq(schema.default(:cache_enabled))
@@ -144,6 +193,19 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(parsed.dig('swift', 'functions')).to eq(schema.default(:swift_functions))
       expect(parsed.dig('privacy', 'redact_prompts')).to eq(schema.default(:redact_prompts))
       expect(sample).to include('Custom entries extend the built-in localization functions')
+    end
+  end
+
+  describe I18nContextGenerator::ConfigCommand do
+    it 'validates a schema-versioned configuration file' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'config.yml')
+        File.write(path, "schema_version: 1\nsource:\n  paths:\n    - .\n")
+        command = described_class.new
+
+        expect { command.validate(path) }
+          .to output(/Configuration is valid \(schema version 1\)/).to_stdout
+      end
     end
   end
 

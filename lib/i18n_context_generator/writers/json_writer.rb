@@ -38,7 +38,13 @@ module I18nContextGenerator
           end
         }
 
-        File.write(path, Oj.dump(output, indent: 2, mode: :compat))
+        rendered = Oj.dump(output, indent: 2, mode: :compat)
+        if path == '-'
+          $stdout.write(rendered)
+          $stdout.write("\n") unless rendered.end_with?("\n")
+        else
+          File.write(path, rendered)
+        end
       end
     end
   end

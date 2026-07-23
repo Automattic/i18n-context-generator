@@ -33,9 +33,9 @@ module I18nContextGenerator
         raise TypeError, 'root must be a mapping' unless catalog.is_a?(Hash)
         raise TypeError, 'sourceLanguage must be a non-empty string' unless nonempty_string?(catalog['sourceLanguage'])
         raise TypeError, 'strings must be a mapping' unless catalog['strings'].is_a?(Hash)
-        unless catalog['strings'].all? { |key, entry| nonempty_string?(key) && entry.is_a?(Hash) }
-          raise TypeError, 'strings must map non-empty keys to entries'
-        end
+
+        valid_entries = catalog['strings'].all? { |key, entry| nonempty_string?(key) && entry.is_a?(Hash) }
+        raise TypeError, 'strings must map non-empty keys to entries' unless valid_entries
 
         catalog
       rescue TypeError => e

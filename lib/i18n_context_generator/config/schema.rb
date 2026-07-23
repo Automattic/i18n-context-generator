@@ -7,6 +7,23 @@ module I18nContextGenerator
     # Typed registry for client-facing configuration. CLI metadata and sample
     # configuration defaults are derived from these definitions.
     module Schema
+      VERSION = 1
+      DOCUMENT_KEYS = %w[
+        schema_version translations source llm processing cache output swift privacy workflow
+      ].freeze
+      SECTION_KEYS = {
+        'source' => %w[paths ignore],
+        'llm' => %w[provider model endpoint],
+        'processing' => %w[
+          concurrency context_lines max_matches_per_key max_prompt_chars discovery_mode platform
+        ],
+        'cache' => %w[enabled directory],
+        'output' => %w[path format stdout write_back write_back_to_code context_prefix context_mode],
+        'swift' => %w[functions],
+        'privacy' => %w[include_file_paths include_translation_comments redact_prompts],
+        'workflow' => %w[stage]
+      }.freeze
+
       Definition = Data.define(:name, :type, :default, :values, :yaml_path, :cli) do
         def initialize(name:, type:, default:, values:, yaml_path:, cli:)
           default.freeze if default.respond_to?(:freeze)
@@ -33,6 +50,7 @@ module I18nContextGenerator
           options[:aliases] = cli[:aliases] if cli[:aliases]
           options[:type] = cli.fetch(:type) { Schema.thor_type(type) }
           options[:enum] = values if values
+          options[:repeatable] = true if cli[:repeatable]
           options
         end
 
@@ -50,10 +68,14 @@ module I18nContextGenerator
       DEFINITIONS = [
         Definition.new(name: :config, type: :string, default: nil, values: nil, yaml_path: nil,
                        cli: { aliases: '-c', description: 'Path to config file (.i18n-context-generator.yml)' }),
+        Definition.new(name: :schema_version, type: :integer, default: VERSION, values: [VERSION],
+                       yaml_path: ['schema_version'], cli: nil),
         Definition.new(name: :translations, type: :array, default: [], values: nil, yaml_path: ['translations'],
-                       cli: { type: :string, aliases: '-t', description: 'Translation file(s), comma-separated' }),
+                       cli: { name: :translation, type: :string, repeatable: true, aliases: '-t',
+                              description: 'Translation file (repeat for multiple files)' }),
         Definition.new(name: :source_paths, type: :array, default: ['.'], values: nil, yaml_path: %w[source paths],
-                       cli: { name: :source, type: :string, aliases: '-s', description: 'Source directory(ies) to search, comma-separated' }),
+                       cli: { name: :source, type: :string, repeatable: true, aliases: '-s',
+                              description: 'Source file or directory (repeat for multiple paths)' }),
         Definition.new(name: :ignore_patterns, type: :array, default: [], values: nil, yaml_path: %w[source ignore], cli: nil),
         Definition.new(name: :provider, type: :string, default: 'anthropic',
                        values: %w[anthropic openai openai_compatible], yaml_path: %w[llm provider],
@@ -80,8 +102,12 @@ module I18nContextGenerator
         Definition.new(name: :output_format, type: :string, default: 'csv', values: %w[csv json], yaml_path: %w[output format],
                        cli: { name: :format, aliases: '-f', description: 'Output format', show_default: true,
                               default_note: 'inferred from output path; fallback %s' }),
+        Definition.new(name: :output_stdout, type: :boolean, default: false, values: nil,
+                       yaml_path: %w[output stdout],
+                       cli: { name: :stdout, description: 'Write structured CSV or JSON to stdout' }),
         Definition.new(name: :write_back, type: :boolean, default: false, values: nil, yaml_path: %w[output write_back],
-                       cli: { description: 'Write context back to source translation files (.strings, strings.xml)', show_default: true }),
+                       cli: { description: 'Write context back to translation files (.strings, .xcstrings, strings.xml)',
+                              show_default: true }),
         Definition.new(name: :write_back_to_code, type: :boolean, default: false, values: nil,
                        yaml_path: %w[output write_back_to_code],
                        cli: { description: 'Write context back to Swift source code comment: parameters', show_default: true }),
@@ -99,7 +125,12 @@ module I18nContextGenerator
         Definition.new(name: :dry_run, type: :boolean, default: false, values: nil, yaml_path: nil,
                        cli: { description: 'Show what would be processed without calling the LLM' }),
         Definition.new(name: :key_filter, type: :string, default: nil, values: nil, yaml_path: nil,
-                       cli: { name: :keys, aliases: '-k', description: 'Filter keys (comma-separated patterns, supports * wildcard)' }),
+                       cli: { name: :key, aliases: '-k', type: :string, repeatable: true,
+                              description: 'Key filter pattern (repeatable, supports * wildcard)' }),
+        Definition.new(name: :print_config, type: :boolean, default: false, values: nil, yaml_path: nil,
+                       cli: { description: 'Print the resolved configuration and exit' }),
+        Definition.new(name: :workflow_stage, type: :string, default: 'apply',
+                       values: %w[check plan preview_diff apply], yaml_path: %w[workflow stage], cli: nil),
         Definition.new(name: :diff_base, type: :string, default: nil, values: nil, yaml_path: nil,
                        cli: { description: 'Only process keys changed since this git ref (e.g., main, origin/main)' }),
         Definition.new(name: :diff_head, type: :string, default: 'HEAD', values: nil, yaml_path: nil,
@@ -155,6 +186,26 @@ module I18nContextGenerator
         return default(name) unless configured?(yaml, name)
 
         definition(name).yaml_path.reduce(yaml) { |value, key| value.fetch(key) }
+      end
+
+      def validate_document!(yaml, path:)
+        version = yaml.fetch('schema_version', VERSION)
+        raise Error, "Invalid config #{path}: unsupported schema_version #{version.inspect}; expected #{VERSION}" unless version == VERSION
+
+        unknown_top_level = yaml.keys - DOCUMENT_KEYS
+        raise Error, "Invalid config #{path}: unknown top-level keys: #{unknown_top_level.join(', ')}" if unknown_top_level.any?
+
+        SECTION_KEYS.each do |section, allowed_keys|
+          value = yaml[section]
+          next unless value.is_a?(Hash)
+
+          unknown = value.keys - allowed_keys
+          next if unknown.empty?
+
+          raise Error, "Invalid config #{path}: unknown #{section} keys: #{unknown.join(', ')}"
+        end
+
+        VERSION
       end
     end
   end

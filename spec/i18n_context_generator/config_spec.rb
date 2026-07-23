@@ -187,8 +187,6 @@ RSpec.describe I18nContextGenerator::Config do
           include_translation_comments: false
           redact_prompts: false
 
-        prompt: |
-          Custom prompt here
       YAML
     end
 
@@ -300,6 +298,19 @@ RSpec.describe I18nContextGenerator::Config do
   end
 
   describe '.from_cli' do
+    it 'combines repeatable singular list flags and accepts legacy comma-separated values' do
+      config = described_class.from_cli(
+        translation: %w[First.strings Second.strings],
+        source: ['Sources', 'Features,Shared'],
+        key: ['settings.*', 'profile.title'],
+        keys: 'legacy.one,legacy.two'
+      )
+
+      expect(config.translations).to eq(%w[First.strings Second.strings])
+      expect(config.source_paths).to eq(%w[Sources Features Shared])
+      expect(config.key_filter).to eq('settings.*,profile.title,legacy.one,legacy.two')
+    end
+
     it 'parses CLI options' do
       options = {
         translations: 'file1.strings,file2.strings',
@@ -390,6 +401,25 @@ RSpec.describe I18nContextGenerator::Config do
       expect(merged.concurrency).to eq(10)
       # Original values preserved when not overridden
       expect(merged.translations).to eq(['base.strings'])
+    end
+
+    it 'merges repeatable singular path and key flags over file configuration' do
+      base_config.merge_cli(
+        translation: %w[First.strings Second.strings],
+        source: %w[Sources Shared],
+        key: %w[settings.* profile.title]
+      )
+
+      expect(base_config.translations).to eq(%w[First.strings Second.strings])
+      expect(base_config.source_paths).to eq(%w[Sources Shared])
+      expect(base_config.key_filter).to eq('settings.*,profile.title')
+    end
+
+    it 'normalizes a dash output override to structured stdout' do
+      base_config.merge_cli(output: '-')
+
+      expect(base_config.output_path).to eq('-')
+      expect(base_config.output_stdout).to be(true)
     end
 
     it 'returns self for chaining' do
@@ -527,6 +557,38 @@ RSpec.describe I18nContextGenerator::Config do
       expect { config.validate! }.to raise_error(I18nContextGenerator::Error, /does not match .json path/)
     end
 
+    it 'accepts structured stdout and rejects simultaneous file and stdout destinations' do
+      stdout_config = described_class.new(output_stdout: true, output_format: 'json')
+
+      expect(stdout_config.validate!).to be(stdout_config)
+      expect(stdout_config.output_path).to eq('-')
+
+      conventional_stdout = described_class.new(output_path: '-', output_format: 'json')
+      expect(conventional_stdout.validate!).to be(conventional_stdout)
+      expect(conventional_stdout.output_stdout).to be(true)
+
+      conflict = described_class.new(output_path: 'context.json', output_stdout: true)
+      expect { conflict.validate! }
+        .to raise_error(I18nContextGenerator::Error, /output\.path and output\.stdout/)
+    end
+
+    it 'requires mutation destinations for preview-diff workflows' do
+      valid = described_class.new(workflow_stage: 'preview_diff', write_back_to_code: true)
+      expect(valid.validate!).to be(valid)
+
+      missing = described_class.new(workflow_stage: 'preview_diff')
+      expect { missing.validate! }
+        .to raise_error(I18nContextGenerator::Error, /preview_diff requires write_back or write_back_to_code/)
+
+      stdout = described_class.new(
+        workflow_stage: 'preview_diff',
+        write_back_to_code: true,
+        output_stdout: true
+      )
+      expect { stdout.validate! }
+        .to raise_error(I18nContextGenerator::Error, /preview_diff cannot use structured stdout/)
+    end
+
     it 'requires an explicit model and safe endpoint for OpenAI-compatible providers' do
       valid = described_class.new(
         provider: 'openai_compatible',
@@ -653,6 +715,41 @@ RSpec.describe I18nContextGenerator::Config do
         config = described_class.new(source_paths: [nested, dir, File.join(dir, '.')])
 
         expect(config.source_paths).to eq([dir])
+      end
+    end
+  end
+
+  describe 'versioned client configuration' do
+    it 'accepts unversioned files as schema version 1 and prints resolved values' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'config.yml')
+        File.write(path, "source:\n  paths:\n    - .\n")
+
+        config = described_class.from_file(path)
+        resolved = config.to_h
+
+        expect(config.schema_version).to eq(1)
+        expect(resolved['schema_version']).to eq(1)
+        expect(resolved.dig('llm', 'provider')).to eq('anthropic')
+        expect(resolved.dig('output', 'stdout')).to be(false)
+      end
+    end
+
+    it 'rejects unsupported versions and unknown keys' do
+      Dir.mktmpdir do |dir|
+        future = File.join(dir, 'future.yml')
+        unknown = File.join(dir, 'unknown.yml')
+        unknown_translation = File.join(dir, 'unknown-translation.yml')
+        File.write(future, "schema_version: 2\n")
+        File.write(unknown, "schema_version: 1\nprocessing:\n  concurency: 2\n")
+        File.write(unknown_translation, "translations:\n  - path: Localizable.strings\n    local: en\n")
+
+        expect { described_class.from_file(future) }
+          .to raise_error(I18nContextGenerator::Error, /unsupported schema_version 2/)
+        expect { described_class.from_file(unknown) }
+          .to raise_error(I18nContextGenerator::Error, /unknown processing keys: concurency/)
+        expect { described_class.from_file(unknown_translation) }
+          .to raise_error(I18nContextGenerator::Error, /unknown keys: local/)
       end
     end
   end

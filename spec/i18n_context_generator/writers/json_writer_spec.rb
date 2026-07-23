@@ -43,5 +43,16 @@ RSpec.describe I18nContextGenerator::Writers::JsonWriter do
         expect(output.dig('metrics', 'estimated_cost_usd')).to eq(0.00013)
       end
     end
+
+    it 'writes parseable JSON directly to stdout' do
+      result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title'
+      )
+
+      expect { writer.write([result], '-') }
+        .to output(/\A\{.*"settings.title".*\}\n\z/m).to_stdout
+    end
   end
 end

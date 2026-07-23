@@ -45,4 +45,15 @@ RSpec.describe I18nContextGenerator::Writers::CsvWriter do
       expect(output).not_to include("'settings.title")
     end
   end
+
+  it 'writes parseable CSV directly to stdout' do
+    result = build_result(
+      key: 'settings.title',
+      text: 'Settings',
+      description: 'Navigation title'
+    )
+
+    expect { described_class.new.write([result], '-') }
+      .to output(/\Akey,text,description.*settings\.title,Settings,Navigation title/m).to_stdout
+  end
 end

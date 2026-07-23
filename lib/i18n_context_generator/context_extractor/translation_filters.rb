@@ -16,7 +16,7 @@ module I18nContextGenerator
 
         return [] if @changed_translation_locations.empty?
 
-        puts "Found #{@changed_translation_locations.size} changed translation entries in git diff"
+        log "Found #{@changed_translation_locations.size} changed translation entries in git diff"
 
         entries.select { |entry| changed_translation_locations_for(entry).any? }
       end

@@ -6,6 +6,7 @@ require_relative 'context_extractor/source_entries'
 require_relative 'context_extractor/translation_filters'
 require_relative 'context_extractor/cache_identity'
 require_relative 'context_extractor/extraction_result'
+require_relative 'context_extractor/workflow'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -17,6 +18,7 @@ module I18nContextGenerator
     include SourceEntries
     include TranslationFilters
     include CacheIdentity
+    include Workflow
 
     attr_reader :results, :errors, :metrics
 
@@ -48,26 +50,14 @@ module I18nContextGenerator
 
       log_loaded_entries(entries.size)
 
-      if @config.dry_run
-        puts "\nDry run - would process these keys:"
-        entries.first(20).each { |e| puts "  - #{e.key}: #{truncate(e.text, 50)}" }
-        puts "  ... and #{entries.size - 20} more" if entries.size > 20
-        return
-      end
+      return if pre_extraction_stage_handled?(entries)
 
       process_entries(entries)
       @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
 
-      if @config.output_path
-        write_output
-        puts "\nWrote #{@results.size} results to #{@config.output_path}"
-      end
+      deliver_results
 
-      write_back_to_source if @config.write_back
-
-      write_back_to_code if @config.write_back_to_code
-
-      puts "Errors: #{@errors.size}" if @errors.any?
+      log "Errors: #{@errors.size}" if @errors.any?
       log_metrics
     end
 
@@ -140,14 +130,14 @@ module I18nContextGenerator
       range_info = []
       range_info << "from '#{@config.start_key}'" if @config.start_key
       range_info << "to '#{@config.end_key}'" if @config.end_key
-      puts "Filtering #{range_info.join(' ')}: keys #{start_idx + 1} to #{end_idx + 1}"
+      log "Filtering #{range_info.join(' ')}: keys #{start_idx + 1} to #{end_idx + 1}"
 
       entries[start_idx..end_idx]
     end
 
     def process_entries(entries)
       # Ensure output is not buffered
-      $stdout.sync = true
+      log_output.sync = true
 
       # Results expose changed source locations even during translation-backed
       # discovery. Resolve the diff once on the caller thread before workers can
@@ -158,7 +148,7 @@ module I18nContextGenerator
         '[:bar] :current/:total :percent :eta :key',
         total: entries.size,
         width: 30,
-        output: $stdout
+        output: log_output
       )
 
       # Use a thread pool for concurrent processing
@@ -192,7 +182,7 @@ module I18nContextGenerator
 
       pool.shutdown
       pool.wait_for_termination
-      puts # New line after progress bar
+      log # New line after progress bar
     end
 
     def process_entry(entry)
@@ -316,7 +306,7 @@ module I18nContextGenerator
         next if relevant_results.empty?
 
         writer.write(relevant_results, path)
-        puts "Updated #{path} with context comments"
+        log "Updated #{path} with context comments"
       end
     end
 
@@ -330,18 +320,14 @@ module I18nContextGenerator
       updated_count = 0
       results_by_key = build_results_by_key_for_code_write_back
 
-      swift_files = @config.source_paths.flat_map do |source_path|
-        find_swift_files(source_path, ignore_patterns: @config.ignore_patterns)
-      end.uniq
-
-      swift_files.each do |swift_file|
+      swift_files_for_write_back.each do |swift_file|
         if swift_writer.update_file(swift_file, results_by_key)
           updated_count += 1
-          puts "Updated #{swift_file} with context comments"
+          log "Updated #{swift_file} with context comments"
         end
       end
 
-      puts "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
+      log "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
     end
 
     def validate_translation_entries(entries)

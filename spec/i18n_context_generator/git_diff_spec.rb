@@ -541,4 +541,62 @@ RSpec.describe I18nContextGenerator::GitDiff do
       expect(keys).to be_empty
     end
   end
+
+  describe 'Apple string catalog changes' do
+    it 'attributes changed values and comments to their catalog keys' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.xcstrings')
+        File.write(path, <<~JSON)
+          {
+            "sourceLanguage": "en",
+            "strings": {
+              "settings.title": {
+                "comment": "New settings context",
+                "localizations": {
+                  "en": {
+                    "stringUnit": {
+                      "state": "translated",
+                      "value": "Settings"
+                    }
+                  }
+                }
+              },
+              "profile.title": {
+                "comment": "Profile context"
+              }
+            },
+            "version": "1.0"
+          }
+        JSON
+        diff_output = <<~DIFF
+          diff --git a/Localizable.xcstrings b/Localizable.xcstrings
+          --- a/Localizable.xcstrings
+          +++ b/Localizable.xcstrings
+          @@ -3,7 +3,7 @@
+             "strings": {
+               "settings.title": {
+          -      "comment": "Old settings context",
+          +      "comment": "New settings context",
+                 "localizations": {
+                   "en": {
+                     "stringUnit": {
+          @@ -14,4 +14,5 @@
+               },
+               "profile.title": {
+          +      "comment": "Profile context"
+               }
+        DIFF
+
+        locations = described_class.new.send(
+          :extract_xcstrings_key_locations,
+          diff_output,
+          path
+        )
+
+        expect(locations.keys).to contain_exactly('settings.title', 'profile.title')
+        expect(locations['settings.title']).to contain_exactly("#{path}:5")
+        expect(locations['profile.title']).to contain_exactly("#{path}:16")
+      end
+    end
+  end
 end
