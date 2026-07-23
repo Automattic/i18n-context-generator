@@ -119,7 +119,7 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
 
-        it 'follows LocalizedStringKey wrapper constants to their usage' do
+        it 'follows static LocalizedStringKey wrapper constants to their usage' do
           Dir.mktmpdir do |dir|
             file = File.join(dir, 'LocalizedWrapper.swift')
             File.write(file, <<~SWIFT)
@@ -132,6 +132,13 @@ RSpec.describe I18nContextGenerator::Searcher do
 
             expect(wrapper_searcher.search('wrapped.title').map(&:line)).to contain_exactly(2, 4)
           end
+        end
+
+        it 'does not classify instance properties as type-qualified wrapper constants' do
+          pattern = I18nContextGenerator::LocalizationSyntax.new.ios_wrapper_definition_pattern
+
+          expect(pattern).to match('static let title = LocalizedStringKey("wrapped.title")')
+          expect(pattern).not_to match('let title = LocalizedStringKey("instance.title")')
         end
       end
 

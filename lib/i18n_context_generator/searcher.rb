@@ -182,14 +182,14 @@ module I18nContextGenerator
 
       definition_line = lines[definition_index]
       definition_match = @localization_syntax.ios_wrapper_definition_pattern.match(definition_line)
-      return unless definition_match&.captures&.first
+      return unless definition_match
 
       type_path = find_ios_type_path(lines, definition_index)
       return if type_path.empty?
 
       {
         type_path: type_path,
-        member_name: definition_match[2],
+        member_name: definition_match[:member_name],
         definition_file: match.file,
         definition_line: definition_index + 1
       }

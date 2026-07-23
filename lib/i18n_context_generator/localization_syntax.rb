@@ -100,7 +100,7 @@ module I18nContextGenerator
       @ios_wrapper_definition_pattern ||= begin
         functions = (@swift_functions.map { |function| swift_call_prefix(function) } +
           ['LocalizedStringKey\\s*\\(']).join('|')
-        /\b(static\s+)?(?:let|var)\s+(\w+)\s*=\s*(?:#{functions})/
+        /\bstatic\s+(?:let|var)\s+(?<member_name>\w+)\s*=\s*(?:#{functions})/
       end
     end
 
