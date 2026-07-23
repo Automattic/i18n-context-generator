@@ -15,7 +15,7 @@ RSpec.describe I18nContextGenerator::FileClassifier do
     expect(described_class.android_resource_xml?('resources/layout/screen.xml')).to be(false)
   end
 
-  it 'searches Android manifests only after the run is known to be Android' do
+  it 'classifies Android manifests and searches them for Android or unknown runs' do
     manifest = 'app/src/main/AndroidManifest.xml'
 
     expect(described_class.searchable_source?(manifest, platform: :android)).to be(true)
