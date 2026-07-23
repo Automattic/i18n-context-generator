@@ -41,7 +41,10 @@ module I18nContextGenerator
           tone: { type: %w[string null], enum: TONES + [nil] },
           max_length: { type: %w[integer null] },
           confidence: { type: 'string', enum: CONFIDENCE_LEVELS },
-          ambiguity_reason: { type: %w[string null] }
+          ambiguity_reason: {
+            type: %w[string null],
+            description: 'Null for high confidence; a non-empty explanation for medium or low confidence'
+          }
         }
       }.freeze
       RESPONSE_FIELDS = %i[description ui_element tone max_length confidence ambiguity_reason].freeze
@@ -372,6 +375,9 @@ module I18nContextGenerator
       end
 
       def valid_ambiguity_reason?(data)
+        # Provider schemas validate structure. Keep this cross-field semantic
+        # invariant here because portable structured-output subsets do not
+        # consistently support JSON Schema conditionals.
         reason = data[:ambiguity_reason]
         return false unless reason.nil? || (reason.is_a?(String) && !reason.strip.empty?)
         return false if reason.to_s.length > MAX_AMBIGUITY_REASON_LENGTH

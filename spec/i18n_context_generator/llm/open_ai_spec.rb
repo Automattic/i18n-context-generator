@@ -121,5 +121,31 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
       )
       expect(client).not_to have_received(:post_json)
     end
+
+    it 'preserves request telemetry for exhausted retries and malformed responses' do
+      allow(client).to receive(:sleep)
+      allow(client).to receive(:post_json).and_raise(Errno::ECONNRESET, 'reset')
+
+      exhausted = client.generate_context(key: 'one', text: 'One', matches: [])
+
+      expect(exhausted).to have_attributes(
+        description: 'API request failed',
+        request_count: 3,
+        retries: 2,
+        error: /reset/
+      )
+
+      malformed_response = instance_double(Net::HTTPOK, code: '200', body: '{invalid')
+      allow(client).to receive(:post_json).and_return(malformed_response)
+
+      malformed = client.generate_context(key: 'two', text: 'Two', matches: [])
+
+      expect(malformed).to have_attributes(
+        description: 'API request failed',
+        request_count: 1,
+        retries: 0,
+        error: /expected object key|unexpected character|unexpected token|parse/i
+      )
+    end
   end
 end

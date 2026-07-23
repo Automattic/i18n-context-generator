@@ -100,5 +100,19 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
       )
       expect(client).not_to have_received(:post_json)
     end
+
+    it 'preserves request telemetry when transient failures exhaust retries' do
+      allow(client).to receive(:sleep)
+      allow(client).to receive(:post_json).and_raise(Net::ReadTimeout, 'timed out')
+
+      result = client.generate_context(key: 'common.save', text: 'Save', matches: [])
+
+      expect(result).to have_attributes(
+        description: 'API request failed',
+        request_count: 3,
+        retries: 2,
+        error: /timed out/
+      )
+    end
   end
 end

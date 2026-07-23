@@ -18,6 +18,7 @@ module I18nContextGenerator
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
                            include_file_paths: false, redact_prompts: true,
                            max_prompt_chars: nil)
+        outcome = nil
         model = resolved_model(model)
         prompt = build_prompt(
           key: key,
@@ -33,7 +34,11 @@ module I18nContextGenerator
       rescue PromptPreparationError => e
         ContextResult.new(description: 'Prompt preparation failed', error: e.message)
       rescue StandardError => e
-        ContextResult.new(description: 'API request failed', error: e.message)
+        ContextResult.new(
+          description: 'API request failed',
+          error: e.message,
+          **failure_request_telemetry(e, outcome: outcome)
+        )
       end
 
       private
@@ -139,7 +144,7 @@ module I18nContextGenerator
           input_tokens: body.dig('usage', 'input_tokens').to_i,
           output_tokens: body.dig('usage', 'output_tokens').to_i,
           retries: retries,
-          request_count: 1
+          request_count: retries + 1
         }
       end
     end
