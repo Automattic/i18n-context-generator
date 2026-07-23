@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 module I18nContextGenerator
   class ContextExtractor
     # Builds a stable cache identity from every input that can shape the prompt.
@@ -10,12 +12,23 @@ module I18nContextGenerator
         JSON.generate(
           matches: sorted_cache_matches(matches),
           comment: comment,
+          supplemental_context: cache_context_sources,
           provider: @config.provider,
           resolved_model: resolved_model,
           endpoint: @config.endpoint,
           prompt: cache_prompt_settings,
           source_discovery: cache_source_discovery(entry)
         )
+      end
+
+      def cache_context_sources
+        @cache_context_sources ||= supplemental_context.map do |source|
+          {
+            kind: source.kind,
+            name: source.name,
+            sha256: Digest::SHA256.hexdigest(source.content)
+          }.freeze
+        end.freeze
       end
 
       def sorted_cache_matches(matches)

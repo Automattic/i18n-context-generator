@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+module I18nContextGenerator
+  class Error < StandardError; end
+end
+
 require 'yaml'
 require 'csv'
 require 'digest'
@@ -12,6 +16,7 @@ require 'dotstrings'
 require_relative 'i18n_context_generator/version'
 require_relative 'i18n_context_generator/path_policy'
 require_relative 'i18n_context_generator/file_classifier'
+require_relative 'i18n_context_generator/supplemental_context'
 require_relative 'i18n_context_generator/apple_string_literal'
 require_relative 'i18n_context_generator/changed_location'
 require_relative 'i18n_context_generator/localization_syntax'
@@ -45,7 +50,3 @@ require_relative 'i18n_context_generator/git_diff'
 require_relative 'i18n_context_generator/platform_validator'
 require_relative 'i18n_context_generator/run_metrics'
 require_relative 'i18n_context_generator/context_extractor'
-
-module I18nContextGenerator
-  class Error < StandardError; end
-end

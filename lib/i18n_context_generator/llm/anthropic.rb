@@ -18,7 +18,7 @@ module I18nContextGenerator
 
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
                            include_file_paths: false, redact_prompts: true,
-                           max_prompt_chars: nil)
+                           max_prompt_chars: nil, supplemental_context: [])
         outcome = nil
         model = resolved_model(model)
         prompt = build_prompt(
@@ -28,7 +28,8 @@ module I18nContextGenerator
           comment: comment,
           include_file_paths: include_file_paths,
           redact_prompts: redact_prompts,
-          max_prompt_chars: max_prompt_chars
+          max_prompt_chars: max_prompt_chars,
+          supplemental_context: supplemental_context
         )
         outcome = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
         handle_response(outcome.response, retries: outcome.retries)

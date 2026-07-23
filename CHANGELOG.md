@@ -39,6 +39,8 @@ _None_
   HTTPS endpoints.
 - Add a versioned configuration schema, `config validate`, and `--print-config`.
 - Expose side-aware translation diff locations and injectable programmatic I/O.
+- Accept multiple free-form context files and named runtime context as redacted,
+  prompt-injection-resistant evidence with cache-safe content invalidation.
 
 ### Bug Fixes
 

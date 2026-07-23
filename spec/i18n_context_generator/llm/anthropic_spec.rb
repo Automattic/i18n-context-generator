@@ -32,6 +32,13 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
     end
 
     it 'passes the configured Anthropic model through unchanged' do
+      supplemental_context = [
+        I18nContextGenerator::ContextSource.new(
+          kind: :file,
+          name: 'GLOSSARY.md',
+          content: 'Reader is the subscription surface.'
+        )
+      ]
       allow(client).to receive(:post_json) do |uri:, headers:, body:, **_kwargs|
         expect(uri.to_s).to eq(described_class::API_URL)
         expect(headers).to eq(
@@ -43,6 +50,7 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
         expect(body[:system]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
         expect(body.dig(:output_config, :format, :type)).to eq('json_schema')
         expect(body.dig(:output_config, :format, :schema, :required)).to include('description')
+        expect(body.dig(:messages, 0, :content)).to include('GLOSSARY.md', 'subscription surface')
         response
       end
 
@@ -50,7 +58,8 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
         key: 'common.save',
         text: 'Save',
         matches: [],
-        model: 'claude-sonnet-4-6'
+        model: 'claude-sonnet-4-6',
+        supplemental_context: supplemental_context
       )
 
       expect(client).to have_received(:post_json)

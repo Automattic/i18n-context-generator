@@ -578,6 +578,30 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(extractor.results).to be_empty
     end
 
+    it 'rejects globally oversized supplemental context before starting workers' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source',
+        supplemental_context: { 'Glossary' => 'full glossary content ' * 150 },
+        max_prompt_chars: 2_000
+      )
+      extractor = described_class.new(config, quiet: true, progress: false)
+      entries = [
+        build_entry('settings.title', 'Settings'),
+        build_entry('settings.save', 'Save')
+      ]
+      client = I18nContextGenerator::LLM::Client.new
+      allow(extractor).to receive(:load_entries).and_return(entries)
+      allow(extractor).to receive(:process_entries)
+      allow(I18nContextGenerator::LLM::Client).to receive(:for).and_return(client)
+
+      expect { extractor.run }
+        .to raise_error(I18nContextGenerator::Error, /complete supplemental context/)
+      expect(extractor).not_to have_received(:process_entries)
+      expect(extractor.results).to be_empty
+    end
+
     it 'passes the once-resolved platform into source discovery' do
       Dir.mktmpdir do |source_dir|
         config = I18nContextGenerator::Config.new(
@@ -1178,7 +1202,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         comment: 'Shown in the settings navigation bar',
         include_file_paths: false,
         redact_prompts: true,
-        max_prompt_chars: 50_000
+        max_prompt_chars: 50_000,
+        supplemental_context: []
       )
       expect(cache_write[:key]).to eq('settings.title')
       expect(cache_write[:text]).to eq('Settings')
@@ -1198,6 +1223,74 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(
         ['/tmp/SettingsViewController.swift:10', '/tmp/SettingsHeaderView.swift:18']
       )
+    end
+
+    it 'loads supplemental context once, forwards it, and caches only content digests' do
+      Dir.mktmpdir do |dir|
+        glossary = File.join(dir, 'GLOSSARY.md')
+        glossary_content = "# Reader\nProduct terminology"
+        pull_request_title = 'Clarify Reader labels'
+        glossary_digest = Digest::SHA256.hexdigest(glossary_content)
+        pull_request_digest = Digest::SHA256.hexdigest(pull_request_title)
+        File.write(glossary, glossary_content)
+        context_config = I18nContextGenerator::Config.new(
+          translations: [],
+          context_files: [glossary],
+          supplemental_context: { 'Pull request title' => pull_request_title }
+        )
+        context_extractor = described_class.new(context_config)
+        searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+        cache_contexts = []
+        cache = instance_double(I18nContextGenerator::Cache, set: nil)
+        allow(cache).to receive(:get) do |_key, _text, context:|
+          cache_contexts << context
+          nil
+        end
+        llm = instance_double(I18nContextGenerator::LLM::Anthropic)
+        allow(llm).to receive(:generate_context).and_return(
+          I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+        )
+        allow(File).to receive(:binread).and_call_original
+        digested_contents = []
+        allow(Digest::SHA256).to receive(:hexdigest).and_wrap_original do |method, content|
+          digested_contents << content
+          method.call(content)
+        end
+        allow(context_extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+        2.times { context_extractor.send(:process_entry, entry) }
+
+        expect(File).to have_received(:binread).with(glossary).once
+        sources = nil
+        expect(llm).to have_received(:generate_context).twice do |**arguments|
+          sources = arguments.fetch(:supplemental_context)
+        end
+        expect(sources.map { |source| [source.kind, source.name] }).to eq(
+          [[:file, 'GLOSSARY.md'], [:runtime, 'Pull request title']]
+        )
+
+        identity = JSON.parse(cache_contexts.first)
+        expect(identity['supplemental_context']).to eq(
+          [
+            {
+              'kind' => 'file',
+              'name' => 'GLOSSARY.md',
+              'sha256' => glossary_digest
+            },
+            {
+              'kind' => 'runtime',
+              'name' => 'Pull request title',
+              'sha256' => pull_request_digest
+            }
+          ]
+        )
+        expect(digested_contents).to eq([glossary_content, pull_request_title])
+        expect(cache_contexts).to all(
+          satisfy do |context|
+            !context.include?('Product terminology') && !context.include?('Clarify Reader labels')
+          end
+        )
+      end
     end
 
     it 'does not cache rate-limit, transport, or parse failures so later runs can retry them' do

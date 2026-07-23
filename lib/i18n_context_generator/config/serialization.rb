@@ -12,6 +12,9 @@ module I18nContextGenerator
             'paths' => @source_paths,
             'ignore' => @ignore_patterns
           },
+          'context' => {
+            'files' => @context_files
+          },
           'llm' => {
             'provider' => @provider,
             'model' => @model,

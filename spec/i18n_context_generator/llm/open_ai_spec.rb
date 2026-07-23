@@ -37,6 +37,13 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
     end
 
     it 'sends a structured Responses API request and parses the result' do
+      supplemental_context = [
+        I18nContextGenerator::ContextSource.new(
+          kind: :runtime,
+          name: 'Pull request title',
+          content: 'Clarify the settings title'
+        )
+      ]
       allow(client).to receive(:post_json) do |uri:, headers:, body:, **_kwargs|
         expect(uri.to_s).to eq(described_class::API_URL)
         expect(headers).to eq('Authorization' => 'Bearer test-openai-key')
@@ -45,6 +52,7 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
         expect(body[:max_output_tokens]).to eq(I18nContextGenerator::LLM::Client::MAX_OUTPUT_TOKENS)
         expect(body[:instructions]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
         expect(body[:input]).to include('settings.title')
+        expect(body[:input]).to include('Pull request title', 'Clarify the settings title')
         expect(body.dig(:text, :format, :type)).to eq('json_schema')
         expect(body.dig(:text, :format, :schema, :required)).to include('description')
         response
@@ -54,7 +62,8 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
         key: 'settings.title',
         text: 'Settings',
         matches: [],
-        model: 'gpt-4.1-mini'
+        model: 'gpt-4.1-mini',
+        supplemental_context: supplemental_context
       )
 
       expect(client).to have_received(:post_json)
