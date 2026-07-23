@@ -214,39 +214,54 @@ RSpec.describe I18nContextGenerator::CLI do
           dry_run: true,
           diff_base: 'origin/main'
         )
-        allow(cli).to receive(:validate_diff_base!)
+        allow(cli).to receive(:validate_diff_range!)
         allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
         allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
 
         expect { cli.extract }.not_to raise_error
-        expect(cli).to have_received(:validate_diff_base!).with(base_ref: 'origin/main')
+        expect(cli).to have_received(:validate_diff_range!).with(base_ref: 'origin/main', head_ref: 'HEAD')
       end
     end
   end
 
-  describe 'diff-base validation' do
+  describe 'diff range validation' do
     let(:cli) { described_class.allocate }
 
     before do
       allow(cli).to receive(:exit) { |status| raise_system_exit(status) }
       allow(cli).to receive(:say_error)
-      allow(cli).to receive(:options).and_return(diff_base: 'origin/main')
+      allow(cli).to receive(:options).and_return(diff_base: 'origin/main', diff_head: 'feature/head')
     end
 
     it 'requires a git repository' do
       allow(I18nContextGenerator::GitDiff).to receive(:available?).and_return(false)
 
-      expect { cli.send(:validate_diff_base!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect { cli.send(:validate_diff_range!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
       expect(cli).to have_received(:say_error).with(/requires a git repository/)
     end
 
     it 'requires the specified git ref to exist' do
       git_diff = instance_double(I18nContextGenerator::GitDiff, base_ref_exists?: false)
       allow(I18nContextGenerator::GitDiff).to receive(:available?).and_return(true)
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'feature/head').and_return(git_diff)
 
-      expect { cli.send(:validate_diff_base!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect { cli.send(:validate_diff_range!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
       expect(cli).to have_received(:say_error).with(%r{git ref 'origin/main' not found})
+    end
+
+    it 'requires the specified head ref to exist' do
+      git_diff = instance_double(
+        I18nContextGenerator::GitDiff,
+        base_ref_exists?: true,
+        head_ref_exists?: false
+      )
+      allow(I18nContextGenerator::GitDiff).to receive(:available?).and_return(true)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'feature/head').and_return(git_diff)
+
+      expect { cli.send(:validate_diff_range!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
+      expect(cli).to have_received(:say_error).with(%r{git ref 'feature/head' not found})
     end
   end
 end

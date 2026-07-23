@@ -20,6 +20,32 @@ _None_
 
 _None_
 
+## 0.5.0
+
+### Breaking Changes
+
+_None_
+
+### New Features
+
+- Support explicit base and head refs for diff-backed extraction.
+- Expose changed source and translation locations separately from the complete extraction evidence.
+
+### Bug Fixes
+
+- Raise actionable errors when Git diff execution fails instead of treating the range as unchanged.
+- Normalize symbol values accepted by the programmatic configuration API.
+- Scope diff-selected duplicate keys to the translation file that changed.
+- Limit changed Android collection entries to the exact plural quantity or array item.
+- Track complete multiline iOS localization calls so comment-only changes remain discoverable.
+- Expose machine-readable extraction result status instead of requiring consumers to match placeholder text.
+- Avoid duplicate no-change messages for translation diff runs.
+- Preserve source location occurrence groups so multiline changes produce one integration result per call.
+
+### Internal Changes
+
+- Cache Android collection member resolution per changed location during diff filtering.
+
 ## 0.4.0
 
 ### New Features

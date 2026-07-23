@@ -9,7 +9,7 @@ module I18nContextGenerator
         include_translation_comments redact_prompts
       ].freeze
       OPTIONAL_STRING_OPTIONS = %i[
-        model output_path key_filter diff_base start_key end_key platform
+        model output_path key_filter diff_base diff_head start_key end_key platform
       ].freeze
       TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xml].freeze
 

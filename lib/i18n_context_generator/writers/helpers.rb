@@ -12,6 +12,7 @@ module I18nContextGenerator
 
       def writable_result?(result)
         return false unless result&.description
+        return false if result.respond_to?(:actionable?) && !result.actionable?
         return false unless result.error.nil?
         return false if result.description.strip.empty?
 

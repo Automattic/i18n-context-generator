@@ -259,6 +259,58 @@ RSpec.describe I18nContextGenerator::Searcher do
         )
       end
 
+      it 'captures comments and every source line in multiline localization calls' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'MultilineComment.swift')
+          File.write(file, <<~SWIFT)
+            let title = String(localized: "settings.multiline.title",
+                               comment: "Settings screen title")
+          SWIFT
+          multiline_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios
+          )
+
+          entry = multiline_searcher.discover_localization_entries.first
+
+          expect(entry).to have_attributes(
+            key: 'settings.multiline.title',
+            line: 1,
+            comment: 'Settings screen title',
+            locations: ["#{file}:1", "#{file}:2"],
+            location_groups: [["#{file}:1", "#{file}:2"]]
+          )
+        end
+      end
+
+      it 'discovers String calls with localized on the following line' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'SplitLocalizedArgument.swift')
+          File.write(file, <<~SWIFT)
+            let title = String(
+              localized: "settings.split.title",
+              comment: "Settings screen title"
+            )
+          SWIFT
+          multiline_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios
+          )
+
+          entry = multiline_searcher.discover_localization_entries.first
+
+          expect(entry).to have_attributes(
+            key: 'settings.split.title',
+            line: 2,
+            comment: 'Settings screen title',
+            locations: ["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4"],
+            location_groups: [["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4"]]
+          )
+        end
+      end
+
       it 'keeps the first entry unless a later duplicate adds a comment' do
         uncommented_first = described_class::DiscoveredLocalization.new(
           key: 'settings.title',
@@ -292,7 +344,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             file: 'Third.swift',
             line: 30,
             comment: 'Navigation title for settings screen',
-            locations: ['First.swift:10', 'Second.swift:20', 'Third.swift:30']
+            locations: ['First.swift:10', 'Second.swift:20', 'Third.swift:30'],
+            location_groups: [['First.swift:10'], ['Second.swift:20'], ['Third.swift:30']]
           )
         )
 
@@ -306,7 +359,8 @@ RSpec.describe I18nContextGenerator::Searcher do
             file: 'First.swift',
             line: 10,
             comment: nil,
-            locations: ['First.swift:10', 'Second.swift:20']
+            locations: ['First.swift:10', 'Second.swift:20'],
+            location_groups: [['First.swift:10'], ['Second.swift:20']]
           )
         )
       end

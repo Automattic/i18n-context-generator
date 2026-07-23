@@ -13,6 +13,12 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.text).to eq('Hello')
       expect(result.description).to eq('A greeting')
       expect(result.locations).to eq([])
+      expect(result.changed_locations).to eq([])
+      expect(result.changed_location_groups).to eq([])
+      expect(result.translation_key).to eq('test.key')
+      expect(result.changed_translation_locations).to eq([])
+      expect(result.status).to eq(:success)
+      expect(result).to be_actionable
       expect(result.error).to be_nil
     end
 
@@ -20,7 +26,9 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
         key: 'k', text: 't', description: 'd',
         ui_element: 'button', tone: 'formal',
-        max_length: 20, locations: ['file.swift:10']
+        max_length: 20, locations: ['file.swift:10'], changed_locations: ['file.swift:10'],
+        changed_location_groups: [['file.swift:10']],
+        changed_translation_locations: ['Localizable.strings:4']
       )
 
       h = result.to_h
@@ -28,6 +36,25 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(h[:key]).to eq('k')
       expect(h[:ui_element]).to eq('button')
       expect(h[:locations]).to eq(['file.swift:10'])
+      expect(h[:changed_locations]).to eq(['file.swift:10'])
+      expect(h[:changed_location_groups]).to eq([['file.swift:10']])
+      expect(h[:translation_key]).to eq('k')
+      expect(h[:changed_translation_locations]).to eq(['Localizable.strings:4'])
+      expect(h[:status]).to eq(:success)
+    end
+
+    it 'exposes non-actionable result states without relying on description text' do
+      no_usage = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'unused', text: 'Unused', description: 'Nothing referenced this key', status: :no_usage
+      )
+      failed = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'failed', text: 'Failed', description: 'Provider unavailable', error: 'timeout'
+      )
+      blank = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'blank', text: 'Blank', description: ' '
+      )
+
+      expect([no_usage.actionable?, failed.actionable?, blank.actionable?]).to eq([false, false, false])
     end
   end
 
@@ -184,17 +211,100 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         diff_base: 'origin/main'
       )
       extractor = described_class.new(config)
-      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_keys: Set['days_of_week'])
+      git_diff = instance_double(
+        I18nContextGenerator::GitDiff,
+        changed_key_locations: {
+          ['res/values/strings.xml', 'days_of_week'] => ['res/values/strings.xml:4']
+        }
+      )
       entries = [
-        build_entry('days_of_week[0]', 'Monday'),
-        build_entry('settings.title', 'Settings')
+        build_entry('days_of_week[0]', 'Monday', source_file: 'res/values/strings.xml'),
+        build_entry('settings.title', 'Settings', source_file: 'res/values/strings.xml')
       ]
 
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       result = extractor.send(:filter_by_diff, entries)
 
       expect(result.map(&:key)).to eq(['days_of_week[0]'])
+      expect(extractor.send(:changed_translation_locations_for, result.first))
+        .to eq(['res/values/strings.xml:4'])
+    end
+
+    it 'narrows Android plural changes without rescanning the changed location' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <plurals name="item_count">
+                <item quantity="one">%d item</item>
+                <item quantity="other">%d total items</item>
+              </plurals>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'item_count'] => ["#{path}:4"] }
+        )
+        entries = [
+          build_entry('item_count:one', '%d item', source_file: path, metadata: { plural: 'item_count' }),
+          build_entry('item_count:other', '%d total items', source_file: path, metadata: { plural: 'item_count' })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+        allow(extractor).to receive(:scan_android_collection_members).and_call_original
+
+        result = extractor.send(:filter_by_diff, entries)
+        changed_locations = extractor.send(:changed_translation_locations_for, result.first)
+
+        expect([result.map(&:key), changed_locations]).to eq([['item_count:other'], ["#{path}:4"]])
+        expect(extractor).to have_received(:scan_android_collection_members).once
+      end
+    end
+
+    it 'narrows multiline Android array changes to the exact changed index' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(
+          path,
+          <<~XML
+            <resources>
+              <string-array
+                name="weekdays">
+                <item>Monday</item>
+                <item>
+                  Tuesday
+                </item>
+              </string-array>
+            </resources>
+          XML
+        )
+        config = I18nContextGenerator::Config.new(translations: [path], diff_base: 'main')
+        extractor = described_class.new(config)
+        git_diff = instance_double(
+          I18nContextGenerator::GitDiff,
+          changed_key_locations: { [path, 'weekdays'] => ["#{path}:6"] }
+        )
+        entries = [
+          build_entry('weekdays[0]', 'Monday', source_file: path, metadata: { array: 'weekdays', index: 0 }),
+          build_entry('weekdays[1]', 'Tuesday', source_file: path, metadata: { array: 'weekdays', index: 1 })
+        ]
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'main', head_ref: 'HEAD').and_return(git_diff)
+
+        result = extractor.send(:filter_by_diff, entries)
+
+        expect(result.map(&:key)).to eq(['weekdays[1]'])
+        expect(extractor.send(:changed_translation_locations_for, result.first)).to eq(["#{path}:6"])
+      end
     end
 
     it 'returns an empty array when git diff reports no changed keys' do
@@ -203,11 +313,37 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         diff_base: 'origin/main'
       )
       extractor = described_class.new(config)
-      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_keys: Set.new)
+      git_diff = instance_double(I18nContextGenerator::GitDiff, changed_key_locations: {})
 
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       expect(extractor.send(:filter_by_diff, [build_entry('settings.title', 'Settings')])).to eq([])
+    end
+
+    it 'scopes changed duplicate keys to their translation file' do
+      config = I18nContextGenerator::Config.new(
+        translations: %w[english.strings french.strings],
+        diff_base: 'origin/main'
+      )
+      extractor = described_class.new(config)
+      git_diff = instance_double(
+        I18nContextGenerator::GitDiff,
+        changed_key_locations: {
+          ['english.strings', 'shared.key'] => ['english.strings:1']
+        }
+      )
+      entries = [
+        build_entry('shared.key', 'English', source_file: 'english.strings'),
+        build_entry('shared.key', 'French', source_file: 'french.strings')
+      ]
+
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
+
+      result = extractor.send(:filter_by_diff, entries)
+
+      expect(result.map(&:text)).to eq(['English'])
     end
   end
 
@@ -283,13 +419,33 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         extractor = described_class.new(config)
         git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/View.swift' => Set[10] })
 
-        allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
         allow(extractor).to receive(:searcher).and_return(
           instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [])
         )
 
         expect { extractor.run }
-          .to output("No changed source localization entries found since origin/main.\n").to_stdout
+          .to output("No changed source localization entries found in origin/main...HEAD.\n").to_stdout
+      end
+    end
+
+    it 'prints one message when translation diff filtering finds no entries' do
+      Dir.mktmpdir do |dir|
+        translation_path = File.join(dir, 'Localizable.strings')
+        File.write(translation_path, "\"settings.title\" = \"Settings\";\n")
+        config = I18nContextGenerator::Config.new(
+          translations: [translation_path],
+          diff_base: 'origin/main'
+        )
+        extractor = described_class.new(config)
+        git_diff = instance_double(I18nContextGenerator::GitDiff, changed_key_locations: {})
+
+        allow(I18nContextGenerator::GitDiff).to receive(:new)
+          .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
+
+        expect { extractor.run }
+          .to output("No changed translation keys found in origin/main...HEAD.\n").to_stdout
       end
     end
   end
@@ -331,7 +487,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Shown in settings screen',
             source_location: 'SettingsViewController.swift:12',
-            source_locations: ['SettingsViewController.swift:12']
+            source_locations: ['SettingsViewController.swift:12'],
+            source_location_groups: [['SettingsViewController.swift:12']]
           }
         )
       )
@@ -397,7 +554,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Button title in the editor',
             source_location: 'EditorViewController.swift:18',
-            source_locations: ['EditorViewController.swift:18']
+            source_locations: ['EditorViewController.swift:18'],
+            source_location_groups: [['EditorViewController.swift:18']]
           }
         )
       )
@@ -501,7 +659,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Visible title',
             source_location: 'Sources/SettingsView.swift:12',
-            source_locations: ['Sources/SettingsView.swift:12']
+            source_locations: ['Sources/SettingsView.swift:12'],
+            source_location_groups: [['Sources/SettingsView.swift:12']]
           }
         )
       )
@@ -535,7 +694,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       git_diff = instance_double(I18nContextGenerator::GitDiff, changed_lines: { 'Sources/SettingsView.swift' => Set[18] })
 
       allow(extractor).to receive(:searcher).and_return(searcher)
-      allow(I18nContextGenerator::GitDiff).to receive(:new).with(base_ref: 'origin/main').and_return(git_diff)
+      allow(I18nContextGenerator::GitDiff).to receive(:new)
+        .with(base_ref: 'origin/main', head_ref: 'HEAD').and_return(git_diff)
 
       entries = extractor.send(:load_source_entries)
 
@@ -546,7 +706,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           metadata: {
             comment: 'Visible subtitle',
             source_location: 'Sources/SettingsView.swift:18',
-            source_locations: ['Sources/SettingsView.swift:18']
+            source_locations: ['Sources/SettingsView.swift:18'],
+            source_location_groups: [['Sources/SettingsView.swift:18']]
           }
         )
       )
@@ -578,6 +739,9 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       expect(entry.metadata[:source_locations]).to eq(
         ['Sources/First.swift:10', 'Sources/Preferred.swift:30']
+      )
+      expect(entry.metadata[:source_location_groups]).to eq(
+        [['Sources/First.swift:10', 'Sources/Preferred.swift:30']]
       )
     end
   end
@@ -634,6 +798,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:process_entry, entry)
 
       expect(result.description).to eq('No usage found in source code')
+      expect(result.status).to eq(:no_usage)
+      expect(result).not_to be_actionable
       expect(result.locations).to eq([])
       expect(result.error).to be_nil
     end
@@ -737,6 +903,64 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
     end
 
+    it 'separates changed discovery locations from all evidence locations' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        discovery_mode: :source,
+        source_line_filter: {
+          'Sources/FirstSettingsView.swift' => [8, 9],
+          'Sources/SettingsView.swift' => [14]
+        }
+      )
+      extractor = described_class.new(config)
+      source_entry = build_entry(
+        'settings.title',
+        'Settings',
+        metadata: {
+          source_locations: [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          source_location_groups: [
+            ['./Sources/FirstSettingsView.swift:8', './Sources/FirstSettingsView.swift:9'],
+            ['./Sources/SettingsView.swift:14']
+          ]
+        }
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache = instance_double(I18nContextGenerator::Cache, get: nil, set: nil)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+
+      allow(llm).to receive(:generate_context).and_return(
+        I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+      )
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      result = extractor.send(:process_entry, source_entry)
+
+      expect(
+        [result.locations, result.changed_locations, result.changed_location_groups]
+      ).to eq(
+        [
+          [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          [
+            './Sources/FirstSettingsView.swift:8',
+            './Sources/FirstSettingsView.swift:9',
+            './Sources/SettingsView.swift:14'
+          ],
+          [
+            ['./Sources/FirstSettingsView.swift:8', './Sources/FirstSettingsView.swift:9'],
+            ['./Sources/SettingsView.swift:14']
+          ]
+        ]
+      )
+    end
+
     it 'omits translation comments when the config disables them' do
       config = I18nContextGenerator::Config.new(
         translations: [],
@@ -759,6 +983,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
     end
 
     it 'returns cached results without calling the llm again' do
+      cached_config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_line_filter: { '/tmp/SettingsViewController.swift' => [10] }
+      )
+      cached_extractor = described_class.new(cached_config)
       searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
       cache = instance_double(
         I18nContextGenerator::Cache,
@@ -766,19 +995,23 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           'key' => 'settings.title',
           'text' => 'Settings',
           'description' => 'Cached description',
-          'locations' => ['/tmp/SettingsViewController.swift:10']
+          'locations' => ['stale.swift:99'],
+          'status' => 'success'
         }
       )
       llm = instance_double(I18nContextGenerator::LLM::OpenAI)
 
       allow(llm).to receive(:generate_context)
-      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+      allow(cached_extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
 
-      result = extractor.send(:process_entry, entry)
+      result = cached_extractor.send(:process_entry, entry)
 
       expect(llm).not_to have_received(:generate_context)
       expect(result.description).to eq('Cached description')
+      expect(result.status).to eq(:success)
+      expect(result).to be_actionable
       expect(result.locations).to eq(['/tmp/SettingsViewController.swift:10'])
+      expect(result.changed_locations).to eq(['/tmp/SettingsViewController.swift:10'])
     end
 
     it 'ignores cached failures and calls the llm again' do

@@ -3,6 +3,7 @@
 require_relative 'context_extractor/source_filters'
 require_relative 'context_extractor/run_logging'
 require_relative 'context_extractor/source_entries'
+require_relative 'context_extractor/translation_filters'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -12,14 +13,32 @@ module I18nContextGenerator
     include SourceFilters
     include RunLogging
     include SourceEntries
+    include TranslationFilters
 
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
-                                   :max_length, :locations, :error) do
-      def initialize(key:, text:, description:, source_file: nil, ui_element: nil, tone: nil,
-                     max_length: nil, locations: [], error: nil)
-        super
+                                   :max_length, :locations, :changed_locations, :translation_key,
+                                   :changed_location_groups, :changed_translation_locations, :status, :error) do
+      def initialize(key:, text:, description:, **attributes)
+        defaults = {
+          source_file: nil,
+          ui_element: nil,
+          tone: nil,
+          max_length: nil,
+          locations: [],
+          changed_locations: [],
+          changed_location_groups: [],
+          translation_key: key,
+          changed_translation_locations: [],
+          status: attributes[:error] ? :error : :success,
+          error: nil
+        }
+        values = defaults.merge(attributes)
+        values[:status] = values[:status].to_sym if values[:status].respond_to?(:to_sym)
+        super(key: key, text: text, description: description, **values)
       end
+
+      def actionable? = status == :success && error.nil? && !description.to_s.strip.empty?
 
       def to_h
         {
@@ -31,6 +50,11 @@ module I18nContextGenerator
           tone: tone,
           max_length: max_length,
           locations: locations,
+          changed_locations: changed_locations,
+          changed_location_groups: changed_location_groups,
+          translation_key: translation_key,
+          changed_translation_locations: changed_translation_locations,
+          status: status,
           error: error
         }
       end
@@ -131,29 +155,6 @@ module I18nContextGenerator
       end
     end
 
-    def filter_by_diff(entries)
-      git_diff = GitDiff.new(base_ref: @config.diff_base)
-      changed_keys = git_diff.changed_keys(@config.translations)
-
-      if changed_keys.empty?
-        puts "No changes detected in translation files since #{@config.diff_base}"
-        return []
-      end
-
-      puts "Found #{changed_keys.size} changed keys in git diff"
-
-      entries.select do |entry|
-        changed_keys.include?(entry.key) || changed_keys.include?(android_base_key(entry.key))
-      end
-    end
-
-    # Extract the base resource name from composite Android keys
-    # e.g., "post_likes_count:one" -> "post_likes_count"
-    #        "days_of_week[0]"     -> "days_of_week"
-    def android_base_key(key)
-      key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
-    end
-
     def filter_by_range(entries)
       start_idx = 0
       end_idx = entries.size - 1
@@ -210,6 +211,9 @@ module I18nContextGenerator
             text: entry.text,
             description: 'Processing failed',
             source_file: entry.source_file,
+            translation_key: translation_key_for(entry),
+            changed_translation_locations: changed_translation_locations_for(entry),
+            status: :error,
             error: e.message
           )
           @results << result
@@ -240,6 +244,9 @@ module I18nContextGenerator
           text: entry.text,
           description: 'No usage found in source code',
           source_file: entry.source_file,
+          translation_key: translation_key_for(entry),
+          changed_translation_locations: changed_translation_locations_for(entry),
+          status: :no_usage,
           locations: []
         )
       end
@@ -260,7 +267,7 @@ module I18nContextGenerator
 
       # Check cache with match context included
       cached = cache.get(entry.key, entry.text, context: cache_ctx)
-      return cached_extraction_result(entry, cached) if cached && !(cached[:error] || cached['error'])
+      return cached_extraction_result(entry, cached, matches) if cached && !(cached[:error] || cached['error'])
 
       # Get context from LLM
       llm_result = llm.generate_context(
@@ -273,6 +280,7 @@ module I18nContextGenerator
         redact_prompts: @config.redact_prompts
       )
 
+      result_locations = result_locations_for(entry, matches)
       result = ExtractionResult.new(
         key: entry.key,
         text: entry.text,
@@ -281,16 +289,41 @@ module I18nContextGenerator
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
-        locations: result_locations_for(entry, matches),
+        locations: result_locations,
+        **changed_location_attributes_for(entry, result_locations),
+        translation_key: translation_key_for(entry),
+        changed_translation_locations: changed_translation_locations_for(entry),
+        status: llm_result.error ? :error : :success,
         error: llm_result.error
       )
 
-      cache.set(entry.key, entry.text, result.to_h.except(:source_file), context: cache_ctx) unless result.error
+      unless result.error
+        cache.set(
+          entry.key,
+          entry.text,
+          result.to_h.except(
+            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations
+          ),
+          context: cache_ctx
+        )
+      end
       result
     end
 
-    def cached_extraction_result(entry, cached)
-      ExtractionResult.new(source_file: entry.source_file, **cached.transform_keys(&:to_sym))
+    def cached_extraction_result(entry, cached, matches)
+      attributes = cached.transform_keys(&:to_sym).except(
+        :source_file, :locations, :changed_locations, :changed_location_groups,
+        :translation_key, :changed_translation_locations
+      )
+      locations = result_locations_for(entry, matches)
+      ExtractionResult.new(
+        source_file: entry.source_file,
+        locations: locations,
+        **changed_location_attributes_for(entry, locations),
+        translation_key: translation_key_for(entry),
+        changed_translation_locations: changed_translation_locations_for(entry),
+        **attributes
+      )
     end
 
     def write_output

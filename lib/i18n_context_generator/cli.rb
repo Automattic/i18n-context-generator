@@ -48,6 +48,7 @@ module I18nContextGenerator
     option :write_back_to_code, type: :boolean,
                                 desc: 'Write context back to Swift source code comment: parameters'
     option :diff_base, type: :string, desc: 'Only process keys changed since this git ref (e.g., main, origin/main)'
+    option :diff_head, type: :string, desc: 'Compare --diff-base to this git ref (default: HEAD)'
     option :context_prefix, type: :string,
                             desc: 'Prefix for context comments (default: "Context: ", use empty string for none)'
     option :context_mode, type: :string, enum: %w[replace append],
@@ -67,7 +68,7 @@ module I18nContextGenerator
       config.validate!
       validate_destination!(config)
       validate_api_key!(provider: config.provider, dry_run: config.dry_run)
-      validate_diff_base!(base_ref: config.diff_base) if config.diff_base
+      validate_diff_range!(base_ref: config.diff_base, head_ref: config.diff_head) if config.diff_base
       extractor = ContextExtractor.new(config)
       extractor.run
       fail_if_extraction_errors!(extractor)
@@ -137,17 +138,22 @@ module I18nContextGenerator
       raise Error, 'A non-dry extraction requires --output, --write-back, or --write-back-to-code'
     end
 
-    def validate_diff_base!(base_ref: options[:diff_base])
+    def validate_diff_range!(base_ref: options[:diff_base], head_ref: options[:diff_head] || 'HEAD')
       unless GitDiff.available?
         say_error 'Error: --diff-base requires a git repository'
         exit 1
       end
 
-      git_diff = GitDiff.new(base_ref: base_ref)
-      return if git_diff.base_ref_exists?
+      git_diff = GitDiff.new(base_ref: base_ref, head_ref: head_ref)
+      unless git_diff.base_ref_exists?
+        say_error "Error: git ref '#{base_ref}' not found"
+        say_error 'Try: origin/main, main, or a specific commit SHA'
+        exit 1
+      end
+      return if git_diff.head_ref_exists?
 
-      say_error "Error: git ref '#{base_ref}' not found"
-      say_error 'Try: origin/main, main, or a specific commit SHA'
+      say_error "Error: git ref '#{head_ref}' not found"
+      say_error 'Try: HEAD, a branch name, or a specific commit SHA'
       exit 1
     end
 

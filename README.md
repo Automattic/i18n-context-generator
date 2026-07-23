@@ -153,6 +153,7 @@ Client `source.ignore` entries extend the built-in ignore list; they do not repl
 
 - `-k`, `--keys PATTERNS`: wildcard key filter such as `settings.*`
 - `--diff-base REF`: process only keys changed since a Git ref
+- `--diff-head REF`: compare `--diff-base` to this ref, default `HEAD`
 - `--start-key KEY`: start at a specific key, inclusive
 - `--end-key KEY`: stop at a specific key, inclusive
 - `--dry-run`: preview matching keys without calling the LLM
@@ -258,6 +259,45 @@ bundle exec exe/i18n-context-generator extract \
   --write-back-to-code \
   --context-prefix ""
 ```
+
+`--diff-base` compares against `HEAD` by default. Pass `--diff-head` when a CI system prepares explicit refs:
+
+```bash
+bundle exec exe/i18n-context-generator extract \
+  -t ios/Resources/Localizable.strings \
+  -s ios \
+  --diff-base danger_base \
+  --diff-head danger_head \
+  --output translation-context.json
+```
+
+Programmatic callers can use the same range and may pass enum-style options as strings or symbols:
+
+```ruby
+config = I18nContextGenerator::Config.new(
+  translations: ['ios/Resources/Localizable.strings'],
+  source_paths: ['ios'],
+  discovery_mode: :translations,
+  provider: :anthropic,
+  diff_base: 'danger_base',
+  diff_head: 'danger_head'
+)
+
+extractor = I18nContextGenerator::ContextExtractor.new(config)
+extractor.run
+
+extractor.results.each do |result|
+  result.status                         # :success, :no_usage, or :error
+  result.actionable?                    # Safe to present to a user
+  result.locations                      # Every source location used as extraction evidence
+  result.changed_locations              # Source evidence changed inside the configured range
+  result.changed_location_groups        # Changed source lines grouped by localization occurrence
+  result.translation_key                # Owning translation resource (including Android collections)
+  result.changed_translation_locations  # Exact changed lines for that translation resource
+end
+```
+
+An invalid ref or failed `git diff` raises `I18nContextGenerator::Error`; it is never reported as an unchanged range.
 
 Example GitHub Actions step:
 
