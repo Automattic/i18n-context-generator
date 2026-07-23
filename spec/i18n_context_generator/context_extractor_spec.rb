@@ -1178,7 +1178,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         comment: 'Shown in the settings navigation bar',
         include_file_paths: false,
         redact_prompts: true,
-        max_prompt_chars: 50_000
+        max_prompt_chars: 50_000,
+        supplemental_context: []
       )
       expect(cache_write[:key]).to eq('settings.title')
       expect(cache_write[:text]).to eq('Settings')
@@ -1198,6 +1199,64 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(
         ['/tmp/SettingsViewController.swift:10', '/tmp/SettingsHeaderView.swift:18']
       )
+    end
+
+    it 'loads supplemental context once, forwards it, and caches only content digests' do
+      Dir.mktmpdir do |dir|
+        glossary = File.join(dir, 'GLOSSARY.md')
+        File.write(glossary, "# Reader\nProduct terminology")
+        context_config = I18nContextGenerator::Config.new(
+          translations: [],
+          context_files: [glossary],
+          supplemental_context: { 'Pull request title' => 'Clarify Reader labels' }
+        )
+        context_extractor = described_class.new(context_config)
+        searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+        cache_contexts = []
+        cache = instance_double(I18nContextGenerator::Cache, set: nil)
+        allow(cache).to receive(:get) do |_key, _text, context:|
+          cache_contexts << context
+          nil
+        end
+        llm = instance_double(I18nContextGenerator::LLM::Anthropic)
+        allow(llm).to receive(:generate_context).and_return(
+          I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+        )
+        allow(File).to receive(:binread).and_call_original
+        allow(context_extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+        2.times { context_extractor.send(:process_entry, entry) }
+
+        expect(File).to have_received(:binread).with(glossary).once
+        sources = nil
+        expect(llm).to have_received(:generate_context).twice do |**arguments|
+          sources = arguments.fetch(:supplemental_context)
+        end
+        expect(sources.map { |source| [source.kind, source.name] }).to eq(
+          [[:file, 'GLOSSARY.md'], [:runtime, 'Pull request title']]
+        )
+
+        identity = JSON.parse(cache_contexts.first)
+        expect(identity['supplemental_context']).to eq(
+          [
+            {
+              'kind' => 'file',
+              'name' => 'GLOSSARY.md',
+              'sha256' => Digest::SHA256.hexdigest("# Reader\nProduct terminology")
+            },
+            {
+              'kind' => 'runtime',
+              'name' => 'Pull request title',
+              'sha256' => Digest::SHA256.hexdigest('Clarify Reader labels')
+            }
+          ]
+        )
+        expect(cache_contexts).to all(
+          satisfy do |context|
+            !context.include?('Product terminology') && !context.include?('Clarify Reader labels')
+          end
+        )
+      end
     end
 
     it 'does not cache rate-limit, transport, or parse failures so later runs can retry them' do

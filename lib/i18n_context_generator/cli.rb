@@ -240,6 +240,12 @@ module I18nContextGenerator
           ignore:
             - "**/*.generated.*"
 
+        # Optional free-form reference material included in every LLM request.
+        context:
+          files: []
+          # - GLOSSARY.md
+          # - docs/localization-style.md
+
         # LLM configuration
         llm:
           provider: #{schema.default(:provider)}

@@ -103,6 +103,12 @@ source:
   ignore:
     - "**/*.generated.*"
 
+context:
+  # Free-form text or Markdown included in full for every selected key.
+  files:
+    - GLOSSARY.md
+    - docs/localization-style.md
+
 llm:
   provider: anthropic
   # Optional; each provider has its own default model.
@@ -158,6 +164,7 @@ Unversioned configuration files use schema version 1 compatibility mode: unknown
 
 - `-t`, `--translation FILE`: translation file to process; repeat for multiple files
 - `-s`, `--source PATH`: source file or directory to search; repeat for multiple paths
+- `--context-file PATH`: free-form supplemental context file; repeat for multiple files
 - `-c`, `--config PATH`: load options from `.i18n-context-generator.yml`
 - `-o`, `--output PATH`: write results to a file
 - `--stdout`: write structured CSV or JSON to standard output
@@ -211,9 +218,11 @@ The legacy `--translations` and `--keys` flags still accept comma-separated list
 
 ### Prompt privacy and size
 
-Remote-provider runs send translation text and selected source snippets off the machine. By default, full paths are reduced to basenames and the tool applies pattern-based redaction to keys, text, comments, paths, scopes, matched lines, and surrounding context. This is a best-effort safeguard, not a guarantee that all private or identifying data will be detected. Review the source paths and translation comments you configure before using a remote provider.
+Remote-provider runs send translation text, selected source snippets, configured context files, and programmatic supplemental context off the machine. By default, full paths are reduced to basenames and the tool applies pattern-based redaction to keys, text, comments, paths, scopes, matched lines, surrounding context, and supplemental context. This is a best-effort safeguard, not a guarantee that all private or identifying data will be detected. Review every input you configure before using a remote provider.
 
-`processing.max_prompt_chars` bounds each user prompt. When evidence exceeds the limit, surrounding code and optional metadata are truncated deterministically, with the translation key, text, and at least one usage receiving priority. Provider output is validated against the application contract before it can reach an output writer.
+All context files are treated as opaque, untrusted evidence: they are neither parsed as a glossary nor filtered for relevance, and their complete contents are included in every selected key's request. Named runtime context follows the same contract. Evidence cannot override the system prompt or instruct the model, but prompt-injection defenses are not a substitute for reviewing sensitive inputs.
+
+`processing.max_prompt_chars` bounds each user prompt. When evidence exceeds the limit, surrounding code and optional metadata are truncated deterministically, with the translation key, text, and at least one usage receiving priority. Supplemental context is never partially included: if all of it cannot fit alongside the minimum application evidence, extraction fails with guidance to reduce the context or raise the limit. Provider output is validated against the application contract before it can reach an output writer.
 
 For a local or third-party Responses API, select `openai_compatible` and configure both `llm.model` and `llm.endpoint`. Plain HTTP is accepted only for loopback endpoints; remote endpoints must use HTTPS. Authentication is isolated to `OPENAI_COMPATIBLE_API_KEY`, so this provider never implicitly forwards `OPENAI_API_KEY` to a custom host.
 
@@ -226,7 +235,7 @@ llm:
 
 ### Cache behavior
 
-Caching is opt-in and stores successful results only; provider, resolved model, custom endpoint, prompt controls, source context, and source-discovery locations are part of each cache identity. Writes use private temporary files and atomic replacement so concurrent workers cannot leave partial JSON behind.
+Caching is opt-in and stores successful results only; provider, resolved model, custom endpoint, prompt controls, source context, source-discovery locations, and supplemental-context content digests are part of each cache identity. Raw context-file and runtime-context contents are not stored in the cache identity. Writes use private temporary files and atomic replacement so concurrent workers cannot leave partial JSON behind.
 
 The default directory is `.i18n-context-generator-cache`. Add that directory—or your custom `cache.directory`—to the client repository's `.gitignore`; cached LLM output should not be committed. The generated starter configuration keeps caching disabled by default.
 
@@ -344,6 +353,11 @@ Programmatic callers can use the same range and may pass enum-style options as s
 config = I18nContextGenerator::Config.new(
   translations: ['ios/Resources/Localizable.strings'],
   source_paths: ['ios'],
+  context_files: ['GLOSSARY.md', 'docs/localization-style.md'],
+  supplemental_context: {
+    'Pull request title' => 'Clarify Reader renewal labels',
+    'Pull request description' => 'Updates subscription-expiry messaging.'
+  },
   discovery_mode: :translations,
   provider: :anthropic,
   diff_base: 'danger_base',

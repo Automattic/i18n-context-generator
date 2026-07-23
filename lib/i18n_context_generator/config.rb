@@ -23,7 +23,8 @@ module I18nContextGenerator
                 :context_mode, :start_key, :end_key, :include_file_paths,
                 :include_translation_comments, :redact_prompts, :discovery_mode,
                 :platform, :translation_locales, :max_prompt_chars, :cache_dir, :endpoint,
-                :schema_version, :output_stdout, :print_config, :workflow_stage
+                :schema_version, :output_stdout, :print_config, :workflow_stage,
+                :context_files, :supplemental_context
 
     DEFAULT_CONTEXT_PREFIX = Schema.default(:context_prefix).freeze
     DEFAULT_CONTEXT_MODE = Schema.default(:context_mode).freeze
@@ -40,6 +41,8 @@ module I18nContextGenerator
       @schema_version = fetch_defaulting_value(attrs, :schema_version, Schema.default(:schema_version))
       @translations = deduplicate_paths(fetch_defaulting_value(attrs, :translations, Schema.default(:translations)))
       @source_paths = deduplicate_source_paths(fetch_defaulting_value(attrs, :source_paths, Schema.default(:source_paths)))
+      @context_files = deduplicate_paths(fetch_defaulting_value(attrs, :context_files, Schema.default(:context_files)))
+      @supplemental_context = fetch_defaulting_value(attrs, :supplemental_context, {})
       @source_line_filter = fetch_config_value(attrs, :source_line_filter, nil)
       @translation_locales = fetch_defaulting_value(attrs, :translation_locales, {})
       @ignore_patterns = self.class.merge_ignore_patterns(fetch_defaulting_value(attrs, :ignore_patterns, Schema.default(:ignore_patterns)))
@@ -100,7 +103,7 @@ module I18nContextGenerator
       raise Error, "Invalid config #{path}: root must be a mapping" unless yaml.is_a?(Hash)
 
       schema_version = Schema.validate_document!(yaml, path: path)
-      %w[source llm processing output swift privacy workflow].each { |section| config_section(yaml, section, path) }
+      %w[source context llm processing output swift privacy workflow].each { |section| config_section(yaml, section, path) }
       cache = config_section(yaml, 'cache', path)
       invalid_cache_enabled = cache.key?('enabled') && ![true, false].include?(cache['enabled'])
       raise Error, "Invalid config #{path}: cache.enabled must be true or false" if invalid_cache_enabled
@@ -113,6 +116,7 @@ module I18nContextGenerator
         translation_locales: translation_settings[:locales],
         source_paths: Schema.value(yaml, :source_paths),
         ignore_patterns: Schema.value(yaml, :ignore_patterns),
+        context_files: Schema.value(yaml, :context_files),
         provider: Schema.value(yaml, :provider),
         model: Schema.value(yaml, :model),
         endpoint: Schema.value(yaml, :endpoint),
@@ -153,12 +157,14 @@ module I18nContextGenerator
       translations = cli_path_list(options[:translation], legacy: options[:translations])
       source_paths = cli_path_list(options[:source])
       source_paths = Schema.default(:source_paths) if source_paths.empty?
+      context_files = cli_path_list(options[:context_file])
       key_filters = cli_key_filters(options[:key], legacy: options[:keys])
 
       attrs = {
         schema_version: Schema::VERSION,
         translations: translations,
         source_paths: source_paths,
+        context_files: context_files,
         ignore_patterns: [],
         provider: options[:provider] || Schema.default(:provider),
         model: options[:model],
@@ -206,6 +212,8 @@ module I18nContextGenerator
       end
       source_paths = self.class.cli_path_list(options[:source])
       @source_paths = deduplicate_source_paths(source_paths) if source_paths.any?
+      context_files = self.class.cli_path_list(options[:context_file])
+      @context_files = deduplicate_paths(context_files) if context_files.any?
       key_filters = self.class.cli_key_filters(options[:key], legacy: options[:keys])
       @key_filter = key_filters if key_filters.any?
       merge_cli_provider_and_model(options)

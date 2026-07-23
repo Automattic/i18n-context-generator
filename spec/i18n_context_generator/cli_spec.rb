@@ -25,11 +25,12 @@ RSpec.describe I18nContextGenerator::CLI do
     expect(provider_option.enum).to eq(%w[anthropic openai openai_compatible])
   end
 
-  it 'exposes repeatable singular translation, source, and key options' do
+  it 'exposes repeatable singular translation, source, context file, and key options' do
     options = described_class.commands.fetch('extract').options
 
     expect(options.fetch(:translation).repeatable).to be(true)
     expect(options.fetch(:source).repeatable).to be(true)
+    expect(options.fetch(:context_file).repeatable).to be(true)
     expect(options.fetch(:key).repeatable).to be(true)
     expect(options.fetch(:translation).aliases).to include('-t')
     expect(options.fetch(:key).aliases).to include('-k')
@@ -174,6 +175,8 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(sample).to include('# - path: config/translations.yml', '#   locale: en')
       expect(sample).to include('# platform: ios')
       expect(sample).to include('max_prompt_chars: 50000')
+      expect(sample).to include("context:\n  files:")
+      expect(sample).to include('- GLOSSARY.md')
       expect(sample).to include('enabled: false', 'directory: .i18n-context-generator-cache')
       expect(sample).to include('Best-effort redact likely secrets')
       expect(sample).to include('Source snippets still leave the machine')
@@ -193,6 +196,7 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(parsed.dig('cache', 'directory')).to eq(schema.default(:cache_dir))
       expect(parsed.dig('swift', 'functions')).to eq(schema.default(:swift_functions))
       expect(parsed.dig('privacy', 'redact_prompts')).to eq(schema.default(:redact_prompts))
+      expect(parsed.dig('context', 'files')).to eq(schema.default(:context_files))
       expect(sample).to include('Custom entries extend the built-in localization functions')
     end
   end

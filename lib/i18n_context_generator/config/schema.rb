@@ -9,10 +9,11 @@ module I18nContextGenerator
     module Schema
       VERSION = 1
       DOCUMENT_KEYS = %w[
-        schema_version translations source llm processing cache output swift privacy workflow
+        schema_version translations source context llm processing cache output swift privacy workflow
       ].freeze
       SECTION_KEYS = {
         'source' => %w[paths ignore],
+        'context' => %w[files],
         'llm' => %w[provider model endpoint],
         'processing' => %w[
           concurrency context_lines max_matches_per_key max_prompt_chars discovery_mode platform
@@ -77,6 +78,9 @@ module I18nContextGenerator
                        cli: { name: :source, type: :string, repeatable: true, aliases: '-s',
                               description: 'Source file or directory (repeat for multiple paths)' }),
         Definition.new(name: :ignore_patterns, type: :array, default: [], values: nil, yaml_path: %w[source ignore], cli: nil),
+        Definition.new(name: :context_files, type: :array, default: [], values: nil, yaml_path: %w[context files],
+                       cli: { name: :context_file, type: :string, repeatable: true,
+                              description: 'Supplemental context file (repeat for multiple files)' }),
         Definition.new(name: :provider, type: :string, default: 'anthropic',
                        values: %w[anthropic openai openai_compatible], yaml_path: %w[llm provider],
                        cli: { aliases: '-p', description: 'LLM provider', show_default: true }),

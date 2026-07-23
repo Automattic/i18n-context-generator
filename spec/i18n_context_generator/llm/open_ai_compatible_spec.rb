@@ -36,6 +36,7 @@ RSpec.describe I18nContextGenerator::LLM::OpenAICompatible do
       expect(uri.to_s).to eq('http://127.0.0.1:11434/v1/responses')
       expect(headers).to eq({})
       expect(body[:model]).to eq('local-model')
+      expect(body[:input]).to include('GLOSSARY.md', 'Local product terminology')
       response
     end
 
@@ -43,7 +44,14 @@ RSpec.describe I18nContextGenerator::LLM::OpenAICompatible do
       key: 'settings.title',
       text: 'Settings',
       matches: [],
-      model: 'local-model'
+      model: 'local-model',
+      supplemental_context: [
+        I18nContextGenerator::ContextSource.new(
+          kind: :file,
+          name: 'GLOSSARY.md',
+          content: 'Local product terminology'
+        )
+      ]
     )
 
     expect(result).to have_attributes(

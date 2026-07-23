@@ -38,6 +38,7 @@ module I18nContextGenerator
       @searcher = nil
       @llm = nil
       @cache = nil
+      @supplemental_context = nil
     end
 
     def run
@@ -61,6 +62,7 @@ module I18nContextGenerator
       # Provider construction validates credentials. Resolve it once on the
       # caller thread so a configuration error is reported once instead of
       # being duplicated by every worker.
+      supplemental_context
       llm
       process_entries(entries)
       @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
@@ -89,6 +91,13 @@ module I18nContextGenerator
 
     def cache
       @cache ||= Cache.new(enabled: !@config.no_cache, directory: @config.cache_dir)
+    end
+
+    def supplemental_context
+      @supplemental_context ||= SupplementalContext.load(
+        files: @config.context_files,
+        runtime: @config.supplemental_context
+      )
     end
 
     def load_translations
@@ -226,8 +235,9 @@ module I18nContextGenerator
 
       # Limit matches to avoid huge prompts
       matches = matches.first(@config.max_matches_per_key)
+      context_sources = supplemental_context
 
-      cache_ctx = cache_context(entry, matches, comment)
+      cache_ctx = cache_context(entry, matches, comment, context_sources)
 
       # Check cache with match context included
       cached = cache.get(entry.key, entry.text, context: cache_ctx)
@@ -242,7 +252,8 @@ module I18nContextGenerator
         comment: comment,
         include_file_paths: @config.include_file_paths,
         redact_prompts: @config.redact_prompts,
-        max_prompt_chars: @config.max_prompt_chars
+        max_prompt_chars: @config.max_prompt_chars,
+        supplemental_context: context_sources
       )
 
       result_locations = result_locations_for(entry, matches)

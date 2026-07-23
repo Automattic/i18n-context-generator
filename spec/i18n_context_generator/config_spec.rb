@@ -28,6 +28,8 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.platform).to be_nil
       expect(config.diff_head).to eq('HEAD')
       expect(config.translation_locales).to eq({})
+      expect(config.context_files).to eq([])
+      expect(config.supplemental_context).to eq({})
       expect(config.swift_functions).to include('NSLocalizedString', 'String(localized:', 'Text(')
     end
 
@@ -39,7 +41,9 @@ RSpec.describe I18nContextGenerator::Config do
         output_path: 'output.csv',
         no_cache: false,
         dry_run: true,
-        context_prefix: ''
+        context_prefix: '',
+        context_files: %w[GLOSSARY.md localization-style.md],
+        supplemental_context: { 'Pull request title' => 'Improve checkout labels' }
       )
 
       expect(config.translations).to eq(['/path/to/file.strings'])
@@ -49,6 +53,8 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.no_cache).to be false
       expect(config.dry_run).to be true
       expect(config.context_prefix).to eq('')
+      expect(config.context_files).to eq(%w[GLOSSARY.md localization-style.md])
+      expect(config.supplemental_context).to eq('Pull request title' => 'Improve checkout labels')
     end
 
     it 'adds custom Swift functions without removing the built-in syntaxes' do
@@ -84,7 +90,9 @@ RSpec.describe I18nContextGenerator::Config do
         swift_functions: nil,
         context_prefix: nil,
         context_mode: nil,
-        discovery_mode: nil
+        discovery_mode: nil,
+        context_files: nil,
+        supplemental_context: nil
       )
 
       expect(config.translations).to eq([])
@@ -99,6 +107,8 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.context_prefix).to eq('Context: ')
       expect(config.context_mode).to eq('replace')
       expect(config.discovery_mode).to eq('auto')
+      expect(config.context_files).to eq([])
+      expect(config.supplemental_context).to eq({})
     end
 
     it 'preserves explicit false for booleans while defaulting nil booleans' do
@@ -187,6 +197,11 @@ RSpec.describe I18nContextGenerator::Config do
           include_translation_comments: false
           redact_prompts: false
 
+        context:
+          files:
+            - GLOSSARY.md
+            - docs/localization-style.md
+
       YAML
     end
 
@@ -223,6 +238,8 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.include_file_paths).to be true
       expect(config.include_translation_comments).to be false
       expect(config.redact_prompts).to be false
+      expect(config.context_files).to eq(['GLOSSARY.md', 'docs/localization-style.md'])
+      expect(config.supplemental_context).to eq({})
     end
 
     it 'handles translations as hash with path key' do
@@ -302,12 +319,14 @@ RSpec.describe I18nContextGenerator::Config do
       config = described_class.from_cli(
         translation: %w[First.strings Second.strings],
         source: %w[Sources Features Shared],
+        context_file: %w[GLOSSARY.md localization-style.md],
         key: ['settings.*', 'profile.title'],
         keys: 'legacy.one,legacy.two'
       )
 
       expect(config.translations).to eq(%w[First.strings Second.strings])
       expect(config.source_paths).to eq(%w[Sources Features Shared])
+      expect(config.context_files).to eq(%w[GLOSSARY.md localization-style.md])
       expect(config.key_filter).to eq(%w[settings.* profile.title legacy.one legacy.two])
     end
 
@@ -366,7 +385,8 @@ RSpec.describe I18nContextGenerator::Config do
         context_mode: 'append',
         include_file_paths: true,
         include_translation_comments: false,
-        redact_prompts: false
+        redact_prompts: false,
+        context_file: ['GLOSSARY.md', 'docs/localization-style.md']
       }
 
       config = described_class.from_cli(options)
@@ -392,6 +412,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.include_file_paths).to be true
       expect(config.include_translation_comments).to be false
       expect(config.redact_prompts).to be false
+      expect(config.context_files).to eq(['GLOSSARY.md', 'docs/localization-style.md'])
     end
 
     it 'uses defaults for missing options' do
@@ -414,6 +435,7 @@ RSpec.describe I18nContextGenerator::Config do
     let(:base_config) do
       described_class.new(
         translations: ['base.strings'],
+        context_files: ['base-glossary.md'],
         output_path: 'base.csv',
         no_cache: false,
         concurrency: 5
@@ -440,11 +462,13 @@ RSpec.describe I18nContextGenerator::Config do
       base_config.merge_cli(
         translation: %w[First.strings Second.strings],
         source: %w[Sources Shared],
+        context_file: %w[GLOSSARY.md localization-style.md],
         key: %w[settings.* profile.title]
       )
 
       expect(base_config.translations).to eq(%w[First.strings Second.strings])
       expect(base_config.source_paths).to eq(%w[Sources Shared])
+      expect(base_config.context_files).to eq(%w[GLOSSARY.md localization-style.md])
       expect(base_config.key_filter).to eq(%w[settings.* profile.title])
     end
 
@@ -531,6 +555,38 @@ RSpec.describe I18nContextGenerator::Config do
       config = described_class.new
 
       expect(config.validate!).to be(config)
+    end
+
+    it 'validates context file and runtime context shapes' do
+      invalid = described_class.new(
+        context_files: ['GLOSSARY.md', ''],
+        supplemental_context: { '' => 'value', 'Valid name' => 123 }
+      )
+
+      expect { invalid.validate! }
+        .to raise_error(
+          I18nContextGenerator::Error,
+          /context_files must be an array of non-empty strings.*supplemental_context must map non-empty string names to non-empty string values/
+        )
+    end
+
+    it 'validates configured context file paths' do
+      config = described_class.new(context_files: ['/missing/GLOSSARY.md'])
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, %r{context file not found: /missing/GLOSSARY\.md})
+    end
+
+    it 'serializes context file paths without runtime context contents' do
+      config = described_class.new(
+        context_files: %w[GLOSSARY.md localization-style.md],
+        supplemental_context: { 'Pull request description' => 'Secret feature details' }
+      )
+
+      serialized = config.to_h
+
+      expect(serialized.dig('context', 'files')).to eq(%w[GLOSSARY.md localization-style.md])
+      expect(serialized.to_s).not_to include('Secret feature details', 'Pull request description')
     end
 
     it 'rejects unsafe numeric values' do

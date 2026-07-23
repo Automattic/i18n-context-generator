@@ -39,7 +39,10 @@ module I18nContextGenerator
         validate_string_array(errors, :translations, @translations)
         validate_string_array(errors, :source_paths, @source_paths, allow_empty: false)
         validate_string_array(errors, :ignore_patterns, @ignore_patterns)
+        validate_string_array(errors, :context_files, @context_files)
         validate_string_array(errors, :swift_functions, @swift_functions)
+        errors << 'supplemental_context must map non-empty string names to non-empty string values' unless
+          valid_supplemental_context?
         errors << 'key_filter must be a non-empty string or an array of non-empty strings' unless
           @key_filter.nil? || valid_key_filter?(@key_filter)
 
@@ -123,6 +126,16 @@ module I18nContextGenerator
         @source_paths.each do |path|
           errors << "source path not found: #{path}" unless File.exist?(path)
         end
+
+        return unless string_array?(@context_files)
+
+        @context_files.each do |path|
+          if !File.file?(path)
+            errors << "context file not found: #{path}"
+          elsif !File.readable?(path)
+            errors << "context file is not readable: #{path}"
+          end
+        end
       end
 
       def validate_translation_locales(errors)
@@ -198,11 +211,18 @@ module I18nContextGenerator
       end
 
       def string_array?(value)
-        value.is_a?(Array) && value.all? { |item| item.is_a?(String) && !item.empty? }
+        value.is_a?(Array) && value.all? { |item| item.is_a?(String) && !item.strip.empty? }
       end
 
       def valid_key_filter?(value)
         (value.is_a?(String) && !value.strip.empty?) || (string_array?(value) && value.any?)
+      end
+
+      def valid_supplemental_context?
+        @supplemental_context.is_a?(Hash) && @supplemental_context.all? do |name, value|
+          name.is_a?(String) && !name.strip.empty? &&
+            value.is_a?(String) && !value.strip.empty?
+        end
       end
 
       def validate_integer(errors, name, value, minimum:)
