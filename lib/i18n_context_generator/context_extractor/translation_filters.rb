@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'pathname'
+require_relative '../xml_scanner'
 
 module I18nContextGenerator
   class ContextExtractor
@@ -69,9 +70,12 @@ module I18nContextGenerator
         state = android_collection_scan_state
 
         File.foreach(file).with_index(1) do |line, line_number|
+          line, = XmlScanner.without_comments(line, state[:xml_comment_state])
           track_android_collection_parent(state, line)
+          item_count = line.scan(/<item\b/).size
           track_android_collection_item(state, line)
-          member = state[:member] if state[:parent_name] == expected_parent
+          advance_android_array_for_additional_items(state, item_count)
+          member = state[:member] if state[:parent_name] == expected_parent && item_count <= 1
           return member if line_number == target_line
 
           close_android_collection_elements(state, line)
@@ -86,7 +90,8 @@ module I18nContextGenerator
           array_index: -1,
           member: nil,
           pending_parent: nil,
-          pending_item: nil
+          pending_item: nil,
+          xml_comment_state: {}
         }
       end
 
@@ -128,6 +133,12 @@ module I18nContextGenerator
           state[:member] = "#{state[:parent_name]}[#{state[:array_index]}]"
         end
         state[:pending_item] = nil
+      end
+
+      def advance_android_array_for_additional_items(state, item_count)
+        return unless state[:parent_type] == 'string-array' && item_count > 1
+
+        state[:array_index] += item_count - 1
       end
 
       def close_android_collection_elements(state, line)

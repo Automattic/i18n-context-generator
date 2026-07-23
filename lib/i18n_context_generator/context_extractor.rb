@@ -187,6 +187,11 @@ module I18nContextGenerator
       # Ensure output is not buffered
       $stdout.sync = true
 
+      # Results expose changed source locations even during translation-backed
+      # discovery. Resolve the diff once on the caller thread before workers can
+      # race to initialize the lazy filter.
+      source_line_filter if @config.diff_base
+
       progress = TTY::ProgressBar.new(
         '[:bar] :current/:total :percent :eta :key',
         total: entries.size,

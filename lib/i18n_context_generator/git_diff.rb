@@ -2,6 +2,8 @@
 
 require 'open3'
 require 'pathname'
+require_relative 'translation_comment_index'
+require_relative 'xml_scanner'
 
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
@@ -170,11 +172,17 @@ module I18nContextGenerator
 
     def extract_strings_key_locations(diff_output, file_path)
       locations = Hash.new { |hash, key| hash[key] = [] }
+      added_lines = []
 
       each_added_diff_line(diff_output) do |line, line_number|
+        added_lines << line_number
         next unless line =~ /^\+\s*"([^"]+)"\s*=/
 
         locations[Regexp.last_match(1)] << "#{file_path}:#{line_number}"
+      end
+
+      add_comment_only_locations(locations, added_lines, file_path, format: :strings) do |line_number|
+        "#{file_path}:#{line_number}"
       end
 
       locations
@@ -204,7 +212,9 @@ module I18nContextGenerator
         file_line: nil,
         orphaned_item_file_lines: [],
         pending_tag: nil,
-        file_path: file_path
+        file_path: file_path,
+        added_file_lines: [],
+        xml_comment_state: {}
       }
 
       diff_output.each_line do |line|
@@ -214,13 +224,23 @@ module I18nContextGenerator
         is_removed = line.start_with?('-')
         is_added = line.start_with?('+')
         content = line.sub(/^[ +-]/, '')
-        process_xml_diff_content(state, content, added: is_added) unless is_removed
+        unless is_removed
+          state[:added_file_lines] << state[:file_line] if is_added && state[:file_line]
+          visible_content, = XmlScanner.without_comments(content, state[:xml_comment_state])
+          process_xml_diff_content(state, visible_content, added: is_added)
+        end
         state[:file_line] += 1 if state[:file_line] && !is_removed
       end
 
       resolve_orphaned_items(
         state[:keys], state[:orphaned_item_file_lines], file_path, locations: state[:locations]
       )
+      add_comment_only_locations(
+        state[:locations], state[:added_file_lines], file_path, format: :xml
+      ) do |line_number|
+        line_number
+      end
+      state[:keys].merge(state[:locations].keys)
 
       { keys: state[:keys], locations: state[:locations] }
     end
@@ -308,8 +328,10 @@ module I18nContextGenerator
       current_parent = nil
       parent_at_line = {}
       pending_tag = nil
+      comment_state = {}
 
       File.readlines(file_path).each_with_index do |line, index|
+        line, = XmlScanner.without_comments(line, comment_state)
         if pending_tag
           pending_tag << line
         elsif (tag_start = line.index(/<(?:plurals|string-array)\b/))
@@ -332,6 +354,20 @@ module I18nContextGenerator
 
         keys << parent
         locations[parent] << line_num if locations
+      end
+    end
+
+    def add_comment_only_locations(locations, added_lines, file_path, format:)
+      return unless File.file?(file_path)
+
+      comment_index = TranslationCommentIndex.new(file_path, format: format)
+
+      added_lines.each do |line_number|
+        key = comment_index.key_at(line_number)
+        next unless key
+        next if locations[key].any?
+
+        locations[key] << yield(line_number)
       end
     end
 
