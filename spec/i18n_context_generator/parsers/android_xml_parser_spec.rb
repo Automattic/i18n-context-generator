@@ -127,6 +127,44 @@ RSpec.describe I18nContextGenerator::Parsers::AndroidXmlParser do
       expect(one_entry.metadata[:plural]).to eq('post_likes_count')
       expect(one_entry.metadata[:quantity]).to eq('one')
     end
+
+    it 'preserves parent and item comments as collection-member evidence' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+            <!-- Number of files selected -->
+            <plurals name="selected_files">
+              <!-- Singular variant -->
+              <item quantity="one">%d file</item>
+              <item quantity="other">%d files</item>
+            </plurals>
+            <!-- Weekday labels -->
+            <string-array name="weekdays">
+              <item>Monday</item>
+            </string-array>
+          </resources>
+        XML
+
+        entries = parser.parse(path)
+        one = entries.find { |entry| entry.key == 'selected_files:one' }
+        other = entries.find { |entry| entry.key == 'selected_files:other' }
+        monday = entries.find { |entry| entry.key == 'weekdays[0]' }
+
+        expect(one.metadata).to include(
+          parent_comment: 'Number of files selected',
+          comment: "Number of files selected\nSingular variant"
+        )
+        expect(other.metadata).to include(
+          parent_comment: 'Number of files selected',
+          comment: 'Number of files selected'
+        )
+        expect(monday.metadata).to include(
+          parent_comment: 'Weekday labels',
+          comment: 'Weekday labels'
+        )
+      end
+    end
   end
 
   describe 'edge cases' do

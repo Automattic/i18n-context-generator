@@ -4,6 +4,23 @@ module I18nContextGenerator
   module LLM
     # Shared retry and HTTP error handling for remote LLM providers.
     module RequestPolicy
+      RequestOutcome = Data.define(:response, :retries) do
+        def request_count = retries + 1
+      end
+
+      # Adds run-local attempt counters to a transport exception without
+      # changing its public exception class.
+      module FailureTelemetry
+        attr_reader :request_count, :retries
+
+        def record_request_failure(retries:)
+          @retries = retries
+          @request_count = retries + 1
+          self
+        end
+      end
+      private_constant :FailureTelemetry
+
       MAX_RETRIES = 2
       MAX_RETRY_DELAY = 30.0
       RETRYABLE_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503, 504, 529].freeze
@@ -29,14 +46,17 @@ module I18nContextGenerator
 
         loop do
           response = yield
-          return response unless retryable_response?(response) && retries < MAX_RETRIES
+          return RequestOutcome.new(response: response, retries: retries) unless retryable_response?(response) && retries < MAX_RETRIES
 
           retries += 1
           delay = retry_delay(response, retries)
           reset_http_session(uri)
           sleep(delay)
-        rescue *TRANSIENT_NETWORK_ERRORS
-          raise if retries >= MAX_RETRIES
+        rescue *TRANSIENT_NETWORK_ERRORS => e
+          if retries >= MAX_RETRIES
+            e.extend(FailureTelemetry).record_request_failure(retries: retries)
+            raise
+          end
 
           retries += 1
           reset_http_session(uri)
@@ -69,14 +89,23 @@ module I18nContextGenerator
         nil
       end
 
-      def http_error_result(response)
+      def http_error_result(response, retries: 0)
+        telemetry = request_telemetry(retries: retries)
         case response.code.to_i
         when 401
-          ContextResult.new(description: 'Authentication failed', error: 'Provider rejected the API credentials')
+          ContextResult.new(
+            description: 'Authentication failed',
+            error: 'Provider rejected the API credentials',
+            **telemetry
+          )
         when 429
-          ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
+          ContextResult.new(
+            description: 'Rate limited',
+            error: 'Rate limit exceeded - try reducing concurrency',
+            **telemetry
+          )
         else
-          ContextResult.new(description: 'API error', error: provider_error_message(response))
+          ContextResult.new(description: 'API error', error: provider_error_message(response), **telemetry)
         end
       end
 
@@ -90,6 +119,18 @@ module I18nContextGenerator
         message.gsub(/[\u0000-\u001F\u007F]/, ' ')[0, 500]
       rescue JSON::ParserError, TypeError
         "HTTP #{response.code}"
+      end
+
+      def request_telemetry(retries:)
+        { request_count: retries + 1, retries: retries }
+      end
+
+      def failure_request_telemetry(error, outcome:)
+        return request_telemetry(retries: outcome.retries) if outcome
+        return { request_count: error.request_count, retries: error.retries } if
+          error.respond_to?(:request_count) && error.respond_to?(:retries)
+
+        {}
       end
 
       def reset_http_session(uri)

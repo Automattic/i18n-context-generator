@@ -2,13 +2,19 @@
 
 require 'open3'
 require 'pathname'
+require_relative 'apple_string_literal'
+require_relative 'changed_location'
 require_relative 'translation_comment_index'
 require_relative 'xml_scanner'
 require_relative 'android_resource'
+require_relative 'xcstrings_document'
+require_relative 'git_diff/xml_changes'
 
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
   class GitDiff
+    include GitDiffXmlChanges
+
     def initialize(base_ref: 'main', head_ref: 'HEAD')
       @base_ref = base_ref
       @head_ref = head_ref
@@ -24,7 +30,7 @@ module I18nContextGenerator
     # Get changed translation keys together with the exact changed lines that
     # produced them. Keys are scoped by translation file so duplicate keys in
     # different files remain distinct.
-    # @return [Hash{Array(String, String) => Array<String>}]
+    # @return [Hash{Array(String, String) => Array<ChangedLocation>}]
     def changed_key_locations(translation_paths)
       translation_paths.each_with_object({}) do |path, changes|
         next unless File.exist?(path)
@@ -33,11 +39,30 @@ module I18nContextGenerator
         next if diff_output.empty?
 
         normalized_path = Pathname.new(path).cleanpath.to_s
+        base_content, head_content = revision_contents(path) if revision_contents_needed?(path, diff_output)
+        head_content ||= File.binread(path)
         key_locations = case File.extname(path).downcase
                         when '.strings'
-                          extract_strings_key_locations(diff_output, normalized_path)
+                          extract_strings_key_locations(
+                            diff_output,
+                            normalized_path,
+                            base_content: base_content,
+                            head_content: head_content
+                          )
+                        when '.xcstrings'
+                          extract_xcstrings_key_locations(
+                            diff_output,
+                            normalized_path,
+                            base_content: base_content,
+                            head_content: head_content
+                          )
                         when '.xml'
-                          extract_xml_key_locations(diff_output, normalized_path)
+                          extract_xml_key_locations(
+                            diff_output,
+                            normalized_path,
+                            base_content: base_content,
+                            head_content: head_content
+                          )
                         else
                           {}
                         end
@@ -98,20 +123,29 @@ module I18nContextGenerator
       changed_lines = Hash.new { |h, k| h[k] = Set.new }
       current_file = File.file?(path) ? path : nil
       file_line = nil
+      in_hunk = false
 
       diff_output.each_line do |line|
-        if (match = line.match(%r{^\+\+\+ b/(.+)$}))
+        if line.start_with?('diff ')
+          file_line = nil
+          in_hunk = false
+          next
+        end
+
+        if !in_hunk && (match = line.match(%r{^\+\+\+ b/(.+)$}))
           current_file = resolve_diff_file_path(path, match[1])
           next
         end
 
         if (hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
           file_line = hunk[1].to_i
+          in_hunk = true
           next
         end
 
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
-        next if file_line.nil? || current_file.nil?
+        next if !in_hunk && line.start_with?('index ', '--- ', '+++ ')
+        next if line.start_with?('\\')
+        next if !in_hunk || file_line.nil? || current_file.nil?
 
         if line.start_with?('+')
           changed_lines[current_file] << file_line
@@ -130,10 +164,30 @@ module I18nContextGenerator
       return Pathname.new(path).cleanpath.to_s if File.file?(path)
 
       normalized_path = Pathname.new(path).cleanpath.to_s
+      if Pathname.new(normalized_path).absolute?
+        prefix = repository_prefix_for(path)
+        relative_path = diff_file_path.delete_prefix(prefix)
+        return Pathname.new(File.join(normalized_path, relative_path)).cleanpath.to_s
+      end
       return Pathname.new(diff_file_path).cleanpath.to_s if normalized_path.empty? || normalized_path == '.'
       return Pathname.new(diff_file_path).cleanpath.to_s if diff_file_path == normalized_path || diff_file_path.start_with?("#{normalized_path}/")
 
       Pathname.new(File.join(normalized_path, diff_file_path)).cleanpath.to_s
+    end
+
+    def repository_prefix_for(path)
+      @repository_prefixes ||= {}
+      directory = File.directory?(path) ? path : File.dirname(path)
+      @repository_prefixes[directory] ||= begin
+        stdout, stderr, status = Open3.capture3('git', 'rev-parse', '--show-prefix', chdir: directory)
+        if status.success?
+          stdout.strip.sub(%r{/\z}, '')
+        else
+          detail = stderr.strip
+          detail = 'unable to resolve repository path prefix' if detail.empty?
+          raise Error, "Git diff failed for #{@base_ref}...#{@head_ref} (#{path}): #{detail}"
+        end
+      end
     end
 
     def merge_line_maps!(target, source)
@@ -142,239 +196,153 @@ module I18nContextGenerator
       end
     end
 
-    def extract_keys_from_diff(diff_output, path)
-      ext = File.extname(path).downcase
-
-      case ext
-      when '.strings'
-        extract_strings_keys(diff_output)
-      when '.xml'
-        extract_xml_keys(diff_output, path)
-      else
-        Set.new
-      end
-    end
-
-    # Extract keys from iOS .strings diff
-    # Looks for added lines like: +"key" = "value";
-    def extract_strings_keys(diff_output)
-      keys = Set.new
-
-      diff_output.each_line do |line|
-        # Match added or modified lines (start with +, not ++)
-        next unless line.start_with?('+') && !line.start_with?('++')
-
-        # Extract key from: "key" = "value";
-        keys << Regexp.last_match(1) if line =~ /^\+\s*"([^"]+)"\s*=/
-      end
-
-      keys
-    end
-
-    def extract_strings_key_locations(diff_output, file_path)
+    def extract_strings_key_locations(diff_output, file_path, base_content: nil, head_content: nil)
       locations = Hash.new { |hash, key| hash[key] = [] }
-      added_lines = []
+      head_content ||= File.binread(file_path)
+      head_index = TranslationCommentIndex.new(format: :strings, content: head_content)
+      base_index = TranslationCommentIndex.new(format: :strings, content: base_content) if base_content
 
-      each_added_diff_line(diff_output) do |line, line_number|
-        added_lines << line_number
-        next unless line =~ /^\+\s*"([^"]+)"\s*=/
-
-        locations[Regexp.last_match(1)] << "#{file_path}:#{line_number}"
-      end
-
-      add_comment_only_locations(locations, added_lines, file_path, format: :strings) do |line_number|
-        "#{file_path}:#{line_number}"
-      end
-
-      locations
-    end
-
-    # Extract keys from Android strings.xml diff.
-    # Tracks parent element context from diff lines and uses hunk headers to
-    # map added lines to file positions. When an added <item> can't be attributed
-    # to a parent from diff context alone (e.g. large plural/array blocks where the
-    # opener isn't in the hunk), falls back to reading the actual file.
-    def extract_xml_keys(diff_output, file_path)
-      extract_xml_changes(diff_output, file_path)[:keys]
-    end
-
-    def extract_xml_key_locations(diff_output, file_path)
-      extract_xml_changes(diff_output, file_path)[:locations].transform_values do |lines|
-        lines.map { |line| "#{file_path}:#{line}" }
-      end
-    end
-
-    def extract_xml_changes(diff_output, file_path)
-      state = {
-        keys: Set.new,
-        locations: Hash.new { |hash, key| hash[key] = Set.new },
-        current_parent: nil,
-        current_string: nil,
-        file_line: nil,
-        orphaned_item_file_lines: [],
-        pending_tag: nil,
-        file_path: file_path,
-        added_file_lines: [],
-        xml_comment_state: {}
-      }
-
-      diff_output.each_line do |line|
-        next if update_xml_hunk_line?(state, line)
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ')
-
-        is_removed = line.start_with?('-')
-        is_added = line.start_with?('+')
-        content = line.sub(/^[ +-]/, '')
-        unless is_removed
-          state[:added_file_lines] << state[:file_line] if is_added && state[:file_line]
-          visible_content, contained_comment = XmlScanner.without_comments(content, state[:xml_comment_state])
-          process_xml_diff_content(
-            state,
-            visible_content,
-            added: is_added,
-            contained_comment: contained_comment
-          )
+      each_changed_diff_line(diff_output) do |content, old_line, new_line, side|
+        if side == :right
+          key = AppleStringLiteral.assignment_key(content) || head_index.key_at(new_line)
+          locations[key] << changed_location(file_path, new_line, side: :right) if key
+        elsif base_index
+          key = AppleStringLiteral.assignment_key(content) || base_index.key_at(old_line)
+          fallback_line = head_index.line_for_key(key)
+          if key
+            locations[key] << changed_location(
+              file_path,
+              old_line,
+              side: :left,
+              fallback_line: fallback_line
+            )
+          end
         end
-        state[:file_line] += 1 if state[:file_line] && !is_removed
       end
 
-      resolve_orphaned_items(
-        state[:keys], state[:orphaned_item_file_lines], file_path, locations: state[:locations]
+      prefer_right_locations(locations)
+    end
+
+    def extract_xcstrings_key_locations(diff_output, file_path, base_content: nil, head_content: nil)
+      current_content = head_content || File.binread(file_path)
+      head_index = xcstrings_line_index(head_content || current_content, file_path)
+      base_index = xcstrings_line_index(base_content || head_content || current_content, file_path)
+      locations = Hash.new { |hash, key| hash[key] = [] }
+      head_lines = first_lines_by_key(head_index)
+
+      each_changed_diff_line(diff_output) do |content, old_line, new_line, side|
+        next if content.strip.empty?
+
+        if side == :right
+          key = head_index[new_line]
+          locations[key] << changed_location(file_path, new_line, side: :right) if key
+        else
+          key = base_index[old_line]
+          fallback_line = head_lines[key]
+          if key
+            locations[key] << changed_location(
+              file_path,
+              old_line,
+              side: :left,
+              fallback_line: fallback_line
+            )
+          end
+        end
+      end
+
+      prefer_right_locations(locations)
+    end
+
+    def xcstrings_line_index(content, file_path)
+      return {} unless content
+
+      XcstringsDocument.new(content, path: file_path).line_index
+    end
+
+    def revision_contents_needed?(path, diff_output)
+      File.extname(path).downcase == '.xcstrings' ||
+        diff_output.each_line.any? { |line| line.start_with?('-') && !line.start_with?('---') }
+    end
+
+    def revision_contents(path)
+      directory = File.dirname(File.expand_path(path))
+      root, stderr, status = Open3.capture3('git', 'rev-parse', '--show-toplevel', chdir: directory)
+      unless status.success?
+        detail = stderr.strip
+        detail = 'unable to resolve repository root' if detail.empty?
+        raise Error, "Git diff failed for #{@base_ref}...#{@head_ref} (#{path}): #{detail}"
+      end
+
+      repository_root = root.strip
+      relative_path = Pathname.new(File.expand_path(path))
+                              .relative_path_from(Pathname.new(repository_root)).to_s
+      merge_base, _stderr, status = Open3.capture3(
+        'git', 'merge-base', @base_ref, @head_ref, chdir: repository_root
       )
-      add_comment_only_locations(
-        state[:locations], state[:added_file_lines], file_path, format: :xml
-      ) do |line_number|
-        line_number
+      base_revision = status.success? && !merge_base.strip.empty? ? merge_base.strip : @base_ref
+      [
+        file_at_revision(repository_root, relative_path, base_revision),
+        file_at_revision(repository_root, relative_path, @head_ref)
+      ]
+    end
+
+    def file_at_revision(repository_root, relative_path, revision)
+      stdout, _stderr, status = Open3.capture3(
+        'git', 'show', "#{revision}:#{relative_path}", chdir: repository_root
+      )
+      status.success? ? stdout : nil
+    end
+
+    def changed_location(file, line, side:, fallback_line: nil)
+      ChangedLocation.new(file: file, line: line, side: side, fallback_line: fallback_line)
+    end
+
+    def prefer_right_locations(locations)
+      preferred = locations.transform_values do |values|
+        unique = values.uniq
+        right = unique.select(&:right?)
+        right.empty? ? unique : right
       end
-      state[:keys].merge(state[:locations].keys)
-
-      { keys: state[:keys], locations: state[:locations] }
+      preferred.reject { |_key, values| values.empty? }
     end
 
-    def update_xml_hunk_line?(state, line)
-      hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
-      return false unless hunk
-
-      state[:file_line] = hunk[1].to_i
-      true
-    end
-
-    def process_xml_diff_content(state, content, added:, contained_comment: false)
-      meaningful_change = !content.strip.empty? || contained_comment
-      record_xml_change(state, state[:current_parent]) if added && meaningful_change && state[:current_parent]
-      record_xml_change(state, state[:current_string]) if added && meaningful_change && state[:current_string]
-
-      accumulate_xml_opening_tag(state, content, added: added)
-      complete_xml_opening_tag(state) if state.dig(:pending_tag, :content)&.include?('>')
-      track_xml_item_change(state) if added && content.match?(/<item\b/)
-
-      state[:current_string] = nil if content.match?(%r{</string>})
-      state[:current_parent] = nil if content.match?(%r{</(?:plurals|string-array)>})
-    end
-
-    def accumulate_xml_opening_tag(state, content, added:)
-      if state[:pending_tag]
-        state[:pending_tag][:content] << content
-        state[:pending_tag][:added] ||= added
-        state[:pending_tag][:first_added_line] ||= state[:file_line] if added
-      elsif (tag_start = content.index(/<(?:string-array|plurals|string)\b/))
-        state[:pending_tag] = {
-          content: content[tag_start..],
-          added: added,
-          first_added_line: (state[:file_line] if added)
-        }
+    def first_lines_by_key(line_index)
+      line_index.each_with_object({}) do |(line, key), lines|
+        lines[key] ||= line
       end
     end
 
-    def complete_xml_opening_tag(state)
-      tag = state[:pending_tag]
-      resource = resource_from_opening_tag(tag[:content])
-      if resource
-        record_xml_change(state, resource[:name], line: tag[:first_added_line]) if tag[:added]
-        track_open_xml_resource(state, resource, tag[:content])
-      end
-      state[:pending_tag] = nil
-    end
-
-    def track_open_xml_resource(state, resource, content)
-      if resource[:type] == :string
-        state[:current_string] = resource[:name] unless content.include?('</string>')
-      elsif !content.include?("</#{AndroidResource.tag_for_type(resource[:type])}>")
-        state[:current_parent] = resource[:name]
-      end
-    end
-
-    def track_xml_item_change(state)
-      if state[:current_parent]
-        record_xml_change(state, state[:current_parent])
-      elsif state[:file_line]
-        state[:orphaned_item_file_lines] << state[:file_line]
-      end
-    end
-
-    def record_xml_change(state, key, line: state[:file_line])
-      return unless key
-
-      state[:keys] << key
-      state[:locations][key] << line if line
-    end
-
-    def resource_from_opening_tag(tag)
-      type_match = tag.match(/<(string-array|plurals|string)\b/)
-      name_match = tag.match(/\bname\s*=\s*(["'])(.*?)\1/m)
-      return unless type_match && name_match
-
-      { type: AndroidResource.type_for_tag(type_match[1]), name: name_match[2] }
-    end
-
-    # Build a map of file line numbers to enclosing plural/array resource names,
-    # then use it to attribute orphaned <item> additions to their parent.
-    def resolve_orphaned_items(keys, orphaned_lines, file_path, locations: nil)
-      return if orphaned_lines.empty? || !File.exist?(file_path)
-
-      resource_index = AndroidResource.index(File.read(file_path, encoding: 'UTF-8'))
-
-      orphaned_lines.each do |line_num|
-        parent = resource_index.base_key_at(line_num)
-        next unless parent
-
-        keys << parent
-        locations[parent] << line_num if locations
-      end
-    end
-
-    def add_comment_only_locations(locations, added_lines, file_path, format:)
-      return unless File.file?(file_path)
-
-      comment_index = TranslationCommentIndex.new(file_path, format: format)
-
-      added_lines.each do |line_number|
-        key = comment_index.key_at(line_number)
-        next unless key
-        next if locations[key].any?
-
-        locations[key] << yield(line_number)
-      end
-    end
-
-    def each_added_diff_line(diff_output)
+    def each_changed_diff_line(diff_output)
+      old_line_number = nil
       new_line_number = nil
+      in_hunk = false
 
       diff_output.each_line do |line|
-        if (match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
-          new_line_number = match[1].to_i
+        if line.start_with?('diff ')
+          old_line_number = nil
+          new_line_number = nil
+          in_hunk = false
           next
         end
 
-        next if new_line_number.nil?
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
+        if (match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          old_line_number = match[1].to_i
+          new_line_number = match[2].to_i
+          in_hunk = true
+          next
+        end
+        next if !in_hunk && line.start_with?('index ', '--- ', '+++ ')
+        next if line.start_with?('\\')
+        next if !in_hunk || old_line_number.nil? || new_line_number.nil?
 
         if line.start_with?('+')
-          yield(line, new_line_number)
+          yield(line[1..], nil, new_line_number, :right)
           new_line_number += 1
         elsif line.start_with?('-')
-          next
+          yield(line[1..], old_line_number, nil, :left)
+          old_line_number += 1
         else
+          old_line_number += 1
           new_line_number += 1
         end
       end

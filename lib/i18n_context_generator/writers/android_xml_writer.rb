@@ -18,8 +18,10 @@ module I18nContextGenerator
       def write(results, source_path)
         return unless File.exist?(source_path)
 
+        original_content = File.binread(source_path)
         lines = File.readlines(source_path, encoding: 'UTF-8')
         results_by_key = build_results_lookup(results, source_path)
+        return false unless results_by_key.values.any? { |result| writable_result?(result) }
 
         output_lines = []
         i = 0
@@ -44,9 +46,13 @@ module I18nContextGenerator
           i += 1
         end
 
-        AtomicFile.replace(source_path, output_lines.join) do |candidate_path|
+        rendered = output_lines.join
+        return false if rendered == original_content
+
+        AtomicFile.replace(source_path, rendered) do |candidate_path|
           REXML::Document.new(File.read(candidate_path, encoding: 'UTF-8'))
         end
+        true
       end
 
       private

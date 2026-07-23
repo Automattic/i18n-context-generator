@@ -23,6 +23,8 @@ module I18nContextGenerator
           YamlParser.new(locale: locale)
         when '.strings'
           StringsParser.new
+        when '.xcstrings'
+          XcstringsParser.new
         when '.xml'
           # Check if it's an Android strings.xml
           raise Error, "Unsupported XML format: #{path} (only Android strings.xml is supported)" unless FileClassifier.android_translation_file?(path)

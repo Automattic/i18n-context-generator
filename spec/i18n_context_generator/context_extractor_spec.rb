@@ -65,6 +65,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         build_entry('settings.save', 'Save'),
         build_entry('profile.name', 'Name'),
         build_entry('profile.email', 'Email'),
+        build_entry('greeting,formal', 'Formal greeting'),
         build_entry('[special]', 'Special')
       ]
     end
@@ -96,6 +97,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:filter_entries, entries)
 
       expect(result.map(&:key)).to contain_exactly('settings.title', 'profile.name')
+    end
+
+    it 'preserves commas inside repeatable key patterns' do
+      extractor = build_extractor(key_filter: ['greeting,formal'])
+      result = extractor.send(:filter_entries, entries)
+
+      expect(result.map(&:key)).to eq(['greeting,formal'])
     end
 
     it 'escapes regex metacharacters instead of treating them as character classes' do
@@ -542,6 +550,34 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(extractor).not_to have_received(:process_entries)
     end
 
+    it 'reports a provider configuration error once before starting workers' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      entries = [
+        build_entry('settings.title', 'Settings'),
+        build_entry('settings.save', 'Save')
+      ]
+      allow(extractor).to receive(:load_entries).and_return(entries)
+      allow(extractor).to receive(:process_entries)
+      allow(I18nContextGenerator::LLM::Client).to receive(:for)
+        .and_raise(I18nContextGenerator::Error, 'ANTHROPIC_API_KEY environment variable is required')
+
+      expect { extractor.run }
+        .to raise_error(
+          I18nContextGenerator::Error,
+          'ANTHROPIC_API_KEY environment variable is required'
+        )
+
+      expect(I18nContextGenerator::LLM::Client).to have_received(:for).once
+      expect(extractor).not_to have_received(:process_entries)
+      expect(extractor.errors).to be_empty
+      expect(extractor.results).to be_empty
+    end
+
     it 'passes the once-resolved platform into source discovery' do
       Dir.mktmpdir do |source_dir|
         config = I18nContextGenerator::Config.new(
@@ -606,6 +642,155 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         expect { extractor.run }
           .to output("No changed translation keys found in origin/main...HEAD.\n").to_stdout
       end
+    end
+
+    it 'checks source usage without constructing an LLM client' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source',
+        workflow_stage: 'check'
+      )
+      extractor = described_class.new(config)
+      entry = I18nContextGenerator::Parsers::TranslationEntry.new(
+        key: 'settings.title',
+        text: 'Settings',
+        source_file: nil
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher)
+      source_match = I18nContextGenerator::Searcher::Match.new(
+        file: 'Settings.swift',
+        line: 3,
+        match_line: 'Text("settings.title")'
+      )
+      allow(searcher).to receive(:search).with('settings.title', resource_type: nil).and_return([source_match])
+      allow(extractor).to receive(:load_entries).and_return([entry])
+      extractor.instance_variable_set(:@searcher, searcher)
+      allow(I18nContextGenerator::LLM::Client).to receive(:for)
+
+      expect { extractor.run }
+        .to output(/Check passed: 1 entries parsed; 0 without source usage/).to_stdout
+      expect(I18nContextGenerator::LLM::Client).not_to have_received(:for)
+    end
+
+    it 'plans selected entries without processing them' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source',
+        workflow_stage: 'plan'
+      )
+      extractor = described_class.new(config)
+      entry = I18nContextGenerator::Parsers::TranslationEntry.new(
+        key: 'settings.title',
+        text: 'Settings',
+        source_file: nil
+      )
+      allow(extractor).to receive(:load_entries).and_return([entry])
+      allow(extractor).to receive(:process_entries)
+
+      expect { extractor.run }
+        .to output(/Plan - would process these keys:.*settings\.title.*Destinations: none/m).to_stdout
+      expect(extractor).not_to have_received(:process_entries)
+    end
+  end
+
+  describe 'preview-diff workflow' do
+    it 'renders translation write-back without modifying the translation file' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, "\"settings.title\" = \"Settings\";\n")
+        original = File.binread(path)
+        config = I18nContextGenerator::Config.new(
+          translations: [path],
+          source_paths: [dir],
+          workflow_stage: 'preview_diff',
+          write_back: true
+        )
+        extractor = described_class.new(config)
+        extractor.results << described_class::ExtractionResult.new(
+          key: 'settings.title',
+          text: 'Settings',
+          description: 'Settings screen title',
+          source_file: path
+        )
+
+        expect { extractor.send(:preview_changes) }
+          .to output(%r{diff --git.*Localizable\.strings.*\+/\* Context: Settings screen title \*/}m).to_stdout
+        expect(File.binread(path)).to eq(original)
+      end
+    end
+
+    it 'does not write configured structured output while previewing' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        output_path = File.join(dir, 'context.csv')
+        File.write(path, "\"settings.title\" = \"Settings\";\n")
+        config = I18nContextGenerator::Config.new(
+          translations: [path],
+          source_paths: [dir],
+          workflow_stage: 'preview_diff',
+          write_back: true,
+          output_path: output_path
+        )
+        extractor = described_class.new(config)
+        extractor.results << described_class::ExtractionResult.new(
+          key: 'settings.title',
+          text: 'Settings',
+          description: 'Settings screen title',
+          source_file: path
+        )
+
+        expect { extractor.send(:deliver_results) }
+          .to output(/\Adiff --git.*Settings screen title/m).to_stdout
+        expect(File).not_to exist(output_path)
+      end
+    end
+
+    it 'sends preview diagnostics and metrics to stderr' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'preview_diff',
+        write_back_to_code: true
+      )
+      extractor = described_class.new(config)
+
+      expect { extractor.send(:log, 'Requests: 3, retries: 2') }
+        .to output('').to_stdout
+        .and output(/Requests: 3, retries: 2/).to_stderr
+    end
+  end
+
+  describe '#log_metrics' do
+    it 'labels estimated cost with its standard-price date' do
+      output = StringIO.new
+      extractor = described_class.new(
+        I18nContextGenerator::Config.new(translations: [], provider: 'openai'),
+        log_output: output
+      )
+      result = described_class::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title',
+        input_tokens: 200,
+        output_tokens: 40,
+        request_count: 1
+      )
+      extractor.instance_variable_set(
+        :@metrics,
+        I18nContextGenerator::RunMetrics.from(
+          [result],
+          provider: 'openai',
+          model: 'gpt-5-mini'
+        )
+      )
+
+      extractor.send(:log_metrics)
+
+      expect(output.string).to include(
+        'estimated cost: $0.000130',
+        "standard list prices as of #{I18nContextGenerator::RUN_METRICS_PRICING_AS_OF}"
+      )
     end
   end
 
@@ -1069,8 +1254,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
     end
 
-    it 'includes source discovery locations and the resolved default model in cache identity' do
-      config = I18nContextGenerator::Config.new(translations: [], provider: 'openai')
+    it 'includes source discovery, resolved model, and custom endpoint in cache identity' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        provider: 'openai_compatible',
+        model: 'local-model',
+        endpoint: 'http://127.0.0.1:11434/v1/responses'
+      )
       extractor = described_class.new(config)
       source_entry = build_entry(
         'settings.title',
@@ -1087,7 +1277,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         cache_context = context
         nil
       end
-      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAICompatible)
       allow(llm).to receive(:generate_context).and_return(
         I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
       )
@@ -1096,7 +1286,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       extractor.send(:process_entry, source_entry)
       identity = JSON.parse(cache_context)
 
-      expect(identity['resolved_model']).to eq(I18nContextGenerator::LLM::OpenAI::DEFAULT_MODEL)
+      expect(identity['resolved_model']).to eq('local-model')
+      expect(identity['endpoint']).to eq('http://127.0.0.1:11434/v1/responses')
       expect(identity.dig('source_discovery', 'source_location')).to eq('/tmp/SettingsView.swift:14')
       expect(identity.dig('source_discovery', 'source_locations')).to eq(['/tmp/SettingsView.swift:14'])
     end
@@ -1391,7 +1582,12 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       extractor.send(:write_output)
 
-      expect(writer).to have_received(:write).with(extractor.results, 'out.json')
+      expect(writer).to have_received(:write).with(
+        extractor.results,
+        'out.json',
+        metrics: extractor.metrics,
+        output: $stdout
+      )
     end
 
     it 'uses the CSV writer for non-json output' do
@@ -1404,7 +1600,60 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       extractor.send(:write_output)
 
-      expect(writer).to have_received(:write).with(extractor.results, 'out.csv')
+      expect(writer).to have_received(:write).with(
+        extractor.results,
+        'out.csv',
+        metrics: extractor.metrics,
+        output: $stdout
+      )
+    end
+  end
+
+  describe 'structured stdout delivery' do
+    it 'keeps machine output on stdout and diagnostics on stderr' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        output_stdout: true,
+        output_format: 'json'
+      )
+      extractor = described_class.new(config)
+      extractor.results << described_class::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title'
+      )
+
+      expect { extractor.send(:deliver_results) }
+        .to output(/\A\{.*"settings.title".*\}\n\z/m).to_stdout
+        .and output(/Wrote 1 results to stdout/).to_stderr
+    end
+
+    it 'supports injected machine and diagnostic streams' do
+      structured_output = StringIO.new
+      log_output = StringIO.new
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        output_stdout: true,
+        output_format: 'json'
+      )
+      extractor = described_class.new(
+        config,
+        structured_output: structured_output,
+        log_output: log_output,
+        quiet: true,
+        progress: false
+      )
+      extractor.results << described_class::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title'
+      )
+
+      extractor.send(:deliver_results)
+
+      expect(Oj.load(structured_output.string).dig('entries', 0, 'key')).to eq('settings.title')
+      expect(log_output.string).to be_empty
+      expect(extractor.send(:build_progress, 1)).to be_nil
     end
   end
 
@@ -1414,6 +1663,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
     it 'selects the strings writer for .strings files' do
       expect(extractor.send(:source_writer_for, 'ios/Localizable.strings'))
         .to be_a(I18nContextGenerator::Writers::StringsWriter)
+    end
+
+    it 'selects the string-catalog writer for .xcstrings files' do
+      expect(extractor.send(:source_writer_for, 'ios/Localizable.xcstrings'))
+        .to be_a(I18nContextGenerator::Writers::XcstringsWriter)
     end
 
     it 'selects the Android XML writer for Android string resources' do

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'uri'
 require_relative '../file_classifier'
 
 module I18nContextGenerator
@@ -8,18 +9,19 @@ module I18nContextGenerator
     module Validation
       BOOLEAN_OPTIONS = %i[
         no_cache dry_run write_back write_back_to_code include_file_paths
-        include_translation_comments redact_prompts
+        include_translation_comments redact_prompts output_stdout print_config
       ].freeze
       OPTIONAL_STRING_OPTIONS = %i[
-        model output_path key_filter diff_base diff_head start_key end_key platform
+        model endpoint output_path diff_base diff_head start_key end_key platform
       ].freeze
-      TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xml].freeze
+      TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xcstrings .xml].freeze
 
       def validate!
         errors = []
         validate_collections(errors)
         validate_scalars(errors)
         validate_domains(errors)
+        validate_provider_endpoint(errors)
         validate_configured_paths(errors)
         validate_output(errors)
         validate_cache(errors)
@@ -38,6 +40,8 @@ module I18nContextGenerator
         validate_string_array(errors, :source_paths, @source_paths, allow_empty: false)
         validate_string_array(errors, :ignore_patterns, @ignore_patterns)
         validate_string_array(errors, :swift_functions, @swift_functions)
+        errors << 'key_filter must be a non-empty string or an array of non-empty strings' unless
+          @key_filter.nil? || valid_key_filter?(@key_filter)
 
         errors << 'source_line_filter must be a mapping' if @source_line_filter && !@source_line_filter.is_a?(Hash)
         return if @translation_locales.is_a?(Hash) && @translation_locales.all? do |path, locale|
@@ -69,11 +73,41 @@ module I18nContextGenerator
       end
 
       def validate_domains(errors)
+        errors << "schema_version must be #{Schema::VERSION}" unless @schema_version == Schema::VERSION
         validate_inclusion(errors, :provider, @provider, VALID_PROVIDERS)
         validate_inclusion(errors, :output_format, @output_format, VALID_OUTPUT_FORMATS)
         validate_inclusion(errors, :context_mode, @context_mode, VALID_CONTEXT_MODES)
         validate_inclusion(errors, :discovery_mode, @discovery_mode, VALID_DISCOVERY_MODES)
+        validate_inclusion(errors, :workflow_stage, @workflow_stage, Schema.values(:workflow_stage))
         validate_inclusion(errors, :platform, @platform, VALID_PLATFORMS) unless @platform.nil?
+        errors << 'preview_diff requires write_back or write_back_to_code' if @workflow_stage == 'preview_diff' && !@write_back && !@write_back_to_code
+        errors << 'preview_diff cannot write structured output' if @workflow_stage == 'preview_diff' && @output_path
+      end
+
+      def validate_provider_endpoint(errors)
+        if @provider == 'openai_compatible'
+          errors << 'openai_compatible provider requires an explicit model' if @model.nil?
+          if @endpoint.nil?
+            errors << 'openai_compatible provider requires llm.endpoint'
+          else
+            validate_endpoint_uri(errors)
+          end
+        elsif @endpoint
+          errors << 'llm.endpoint is supported only with the openai_compatible provider'
+        end
+      end
+
+      def validate_endpoint_uri(errors)
+        uri = URI.parse(@endpoint)
+        valid_scheme = %w[http https].include?(uri.scheme)
+        errors << 'llm.endpoint must be an absolute HTTP(S) URL' unless valid_scheme && uri.host
+        errors << 'llm.endpoint must not contain credentials, a query, or a fragment' if uri.userinfo || uri.query || uri.fragment
+
+        loopback_hosts = %w[localhost 127.0.0.1 ::1]
+        normalized_host = uri.hostname&.downcase
+        errors << 'plain HTTP llm.endpoint is allowed only for a loopback host' if uri.scheme == 'http' && !loopback_hosts.include?(normalized_host)
+      rescue URI::InvalidURIError
+        errors << 'llm.endpoint must be an absolute HTTP(S) URL'
       end
 
       def validate_configured_paths(errors)
@@ -103,6 +137,8 @@ module I18nContextGenerator
       end
 
       def validate_output(errors)
+        errors << 'output.path and output.stdout cannot both be configured' if @output_destination_conflict
+        return if @output_stdout
         return unless @output_path.is_a?(String)
 
         extension = File.extname(@output_path).downcase
@@ -163,6 +199,10 @@ module I18nContextGenerator
 
       def string_array?(value)
         value.is_a?(Array) && value.all? { |item| item.is_a?(String) && !item.empty? }
+      end
+
+      def valid_key_filter?(value)
+        (value.is_a?(String) && !value.strip.empty?) || (string_array?(value) && value.any?)
       end
 
       def validate_integer(errors, name, value, minimum:)

@@ -5,6 +5,8 @@ require_relative 'context_extractor/run_logging'
 require_relative 'context_extractor/source_entries'
 require_relative 'context_extractor/translation_filters'
 require_relative 'context_extractor/cache_identity'
+require_relative 'context_extractor/extraction_result'
+require_relative 'context_extractor/workflow'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -16,58 +18,21 @@ module I18nContextGenerator
     include SourceEntries
     include TranslationFilters
     include CacheIdentity
+    include Workflow
 
-    # Result for a single translation key
-    ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
-                                   :max_length, :locations, :changed_locations, :translation_key,
-                                   :changed_location_groups, :changed_translation_locations, :status, :error) do
-      def initialize(key:, text:, description:, **attributes)
-        defaults = {
-          source_file: nil,
-          ui_element: nil,
-          tone: nil,
-          max_length: nil,
-          locations: [],
-          changed_locations: [],
-          changed_location_groups: [],
-          translation_key: key,
-          changed_translation_locations: [],
-          status: attributes[:error] ? :error : :success,
-          error: nil
-        }
-        values = defaults.merge(attributes)
-        values[:status] = values[:status].to_sym if values[:status].respond_to?(:to_sym)
-        super(key: key, text: text, description: description, **values)
-      end
+    attr_reader :results, :errors, :metrics
 
-      def actionable? = status == :success && error.nil? && !description.to_s.strip.empty?
-
-      def to_h
-        {
-          key: key,
-          text: text,
-          description: description,
-          source_file: source_file,
-          ui_element: ui_element,
-          tone: tone,
-          max_length: max_length,
-          locations: locations,
-          changed_locations: changed_locations,
-          changed_location_groups: changed_location_groups,
-          translation_key: translation_key,
-          changed_translation_locations: changed_translation_locations,
-          status: status,
-          error: error
-        }
-      end
-    end
-
-    attr_reader :results, :errors
-
-    def initialize(config)
+    def initialize(config, log_output: nil, structured_output: nil, patch_output: nil,
+                   quiet: false, progress: true)
       @config = config
+      @configured_log_output = log_output
+      @structured_output = structured_output
+      @patch_output = patch_output
+      @quiet = quiet
+      @progress_enabled = progress && !quiet
       @results = Concurrent::Array.new
       @errors = Concurrent::Array.new
+      @metrics = RunMetrics.from([], provider: @config.provider, model: resolved_model)
 
       # Defer initialization of expensive resources
       @searcher = nil
@@ -91,25 +56,19 @@ module I18nContextGenerator
 
       log_loaded_entries(entries.size)
 
-      if @config.dry_run
-        puts "\nDry run - would process these keys:"
-        entries.first(20).each { |e| puts "  - #{e.key}: #{truncate(e.text, 50)}" }
-        puts "  ... and #{entries.size - 20} more" if entries.size > 20
-        return
-      end
+      return if pre_extraction_stage_handled?(entries)
 
+      # Provider construction validates credentials. Resolve it once on the
+      # caller thread so a configuration error is reported once instead of
+      # being duplicated by every worker.
+      llm
       process_entries(entries)
+      @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
 
-      if @config.output_path
-        write_output
-        puts "\nWrote #{@results.size} results to #{@config.output_path}"
-      end
+      deliver_results
 
-      write_back_to_source if @config.write_back
-
-      write_back_to_code if @config.write_back_to_code
-
-      puts "Errors: #{@errors.size}" if @errors.any?
+      log "Errors: #{@errors.size}" if @errors.any?
+      log_metrics
     end
 
     private
@@ -125,7 +84,7 @@ module I18nContextGenerator
     end
 
     def llm
-      @llm ||= LLM::Client.for(@config.provider)
+      @llm ||= LLM::Client.for(@config.provider, endpoint: @config.endpoint)
     end
 
     def cache
@@ -148,7 +107,12 @@ module I18nContextGenerator
     end
 
     def filter_entries(entries)
-      patterns = @config.key_filter.split(',').map do |pattern|
+      configured_patterns = if @config.key_filter.is_a?(Array)
+                              @config.key_filter
+                            else
+                              @config.key_filter.split(',')
+                            end
+      patterns = configured_patterns.map do |pattern|
         escaped = Regexp.escape(pattern.strip).gsub('\*', '.*')
         Regexp.new("^#{escaped}$")
       end
@@ -181,34 +145,24 @@ module I18nContextGenerator
       range_info = []
       range_info << "from '#{@config.start_key}'" if @config.start_key
       range_info << "to '#{@config.end_key}'" if @config.end_key
-      puts "Filtering #{range_info.join(' ')}: keys #{start_idx + 1} to #{end_idx + 1}"
+      log "Filtering #{range_info.join(' ')}: keys #{start_idx + 1} to #{end_idx + 1}"
 
       entries[start_idx..end_idx]
     end
 
     def process_entries(entries)
-      # Ensure output is not buffered
-      $stdout.sync = true
-
       # Results expose changed source locations even during translation-backed
       # discovery. Resolve the diff once on the caller thread before workers can
       # race to initialize the lazy filter.
       source_line_filter if @config.diff_base
 
-      progress = TTY::ProgressBar.new(
-        '[:bar] :current/:total :percent :eta :key',
-        total: entries.size,
-        width: 30,
-        output: $stdout
-      )
+      progress = build_progress(entries.size)
 
       # Use a thread pool for concurrent processing
       pool = Concurrent::FixedThreadPool.new(@config.concurrency)
-      current_key = Concurrent::AtomicReference.new('')
 
       entries.each do |entry|
         pool.post do
-          current_key.set(truncate(entry.key, 40))
           result = process_entry(entry)
           @results << result
           @errors << result if result.error
@@ -227,13 +181,24 @@ module I18nContextGenerator
           @results << result
           @errors << result
         ensure
-          progress.advance(key: current_key.get)
+          progress&.advance(key: truncate(entry.key, 40))
         end
       end
 
       pool.shutdown
       pool.wait_for_termination
-      puts # New line after progress bar
+      log if progress # New line after progress bar
+    end
+
+    def build_progress(total)
+      return unless @progress_enabled
+
+      TTY::ProgressBar.new(
+        '[:bar] :current/:total :percent :eta :key',
+        total: total,
+        width: 30,
+        output: log_output
+      )
     end
 
     def process_entry(entry)
@@ -289,6 +254,12 @@ module I18nContextGenerator
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
+        confidence: llm_result.confidence,
+        ambiguity_reason: llm_result.ambiguity_reason,
+        request_count: llm_result.request_count,
+        input_tokens: llm_result.input_tokens,
+        output_tokens: llm_result.output_tokens,
+        retries: llm_result.retries,
         locations: result_locations,
         **changed_location_attributes_for(entry, result_locations),
         translation_key: translation_key_for(entry),
@@ -302,7 +273,8 @@ module I18nContextGenerator
           entry.key,
           entry.text,
           result.to_h.except(
-            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations
+            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations,
+            :cache_hit, :request_count, :input_tokens, :output_tokens, :retries
           ),
           context: cache_ctx
         )
@@ -313,7 +285,8 @@ module I18nContextGenerator
     def cached_extraction_result(entry, cached, matches)
       attributes = cached.transform_keys(&:to_sym).except(
         :source_file, :locations, :changed_locations, :changed_location_groups,
-        :translation_key, :changed_translation_locations
+        :translation_key, :changed_translation_locations,
+        :cache_hit, :request_count, :input_tokens, :output_tokens, :retries
       )
       locations = result_locations_for(entry, matches)
       ExtractionResult.new(
@@ -322,6 +295,7 @@ module I18nContextGenerator
         **changed_location_attributes_for(entry, locations),
         translation_key: translation_key_for(entry),
         changed_translation_locations: changed_translation_locations_for(entry),
+        cache_hit: true,
         **attributes
       )
     end
@@ -334,7 +308,12 @@ module I18nContextGenerator
                  Writers::CsvWriter.new
                end
 
-      writer.write(@results, @config.output_path)
+      writer.write(
+        @results,
+        @config.output_path,
+        metrics: @metrics,
+        output: @structured_output || $stdout
+      )
     end
 
     def write_back_to_source
@@ -347,33 +326,24 @@ module I18nContextGenerator
         relevant_results = @results.select { |result| result_matches_source_path?(result, path) }
         next if relevant_results.empty?
 
-        writer.write(relevant_results, path)
-        puts "Updated #{path} with context comments"
+        updated = writer.write(relevant_results, path)
+        log "Updated #{path} with context comments" if updated
       end
     end
 
     def write_back_to_code
-      swift_writer = Writers::SwiftWriter.new(
-        functions: @config.swift_functions,
-        context_prefix: @config.context_prefix,
-        context_mode: @config.context_mode
-      )
-
       updated_count = 0
       results_by_key = build_results_by_key_for_code_write_back
+      return if results_by_key.empty?
 
-      swift_files = @config.source_paths.flat_map do |source_path|
-        find_swift_files(source_path, ignore_patterns: @config.ignore_patterns)
-      end.uniq
-
-      swift_files.each do |swift_file|
+      swift_files_for_write_back.each do |swift_file|
         if swift_writer.update_file(swift_file, results_by_key)
           updated_count += 1
-          puts "Updated #{swift_file} with context comments"
+          log "Updated #{swift_file} with context comments"
         end
       end
 
-      puts "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
+      log "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
     end
 
     def validate_translation_entries(entries)
@@ -419,6 +389,11 @@ module I18nContextGenerator
       case ext
       when '.strings'
         Writers::StringsWriter.new(
+          context_prefix: @config.context_prefix,
+          context_mode: @config.context_mode
+        )
+      when '.xcstrings'
+        Writers::XcstringsWriter.new(
           context_prefix: @config.context_prefix,
           context_mode: @config.context_mode
         )

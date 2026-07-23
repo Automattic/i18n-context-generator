@@ -152,6 +152,20 @@ RSpec.describe I18nContextGenerator::LLM::Client do
       expect(described_class.for('openai')).to eq(openai_client)
     end
 
+    it 'builds an explicit OpenAI-compatible endpoint client' do
+      compatible_client = instance_double(I18nContextGenerator::LLM::OpenAICompatible)
+      allow(I18nContextGenerator::LLM::OpenAICompatible).to receive(:new)
+        .with(endpoint: 'http://127.0.0.1:11434/v1/responses')
+        .and_return(compatible_client)
+
+      expect(
+        described_class.for(
+          'openai_compatible',
+          endpoint: 'http://127.0.0.1:11434/v1/responses'
+        )
+      ).to eq(compatible_client)
+    end
+
     it 'reports unsupported providers through the same unknown-provider path' do
       expect { described_class.for('ollama') }
         .to raise_error(I18nContextGenerator::Error, 'Unknown LLM provider: ollama')
@@ -163,7 +177,7 @@ RSpec.describe I18nContextGenerator::LLM::Client do
       :parse_response,
       <<~TEXT
         ```json
-        {"description":"Primary save action","ui_element":"button","tone":"neutral","max_length":12}
+        {"description":"Primary save action","ui_element":"button","tone":"neutral","max_length":12,"confidence":"high","ambiguity_reason":null}
         ```
       TEXT
     )
@@ -172,6 +186,8 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     expect(result.ui_element).to eq('button')
     expect(result.tone).to eq('neutral')
     expect(result.max_length).to eq(12)
+    expect(result.confidence).to eq('high')
+    expect(result.ambiguity_reason).to be_nil
     expect(result.error).to be_nil
   end
 
@@ -198,10 +214,11 @@ RSpec.describe I18nContextGenerator::LLM::Client do
 
   it 'rejects provider fields outside the application output contract' do
     invalid_responses = [
-      '{"description":"Context","ui_element":"dialog","tone":"neutral","max_length":null}',
-      '{"description":"Context","ui_element":"alert","tone":"apologetic","max_length":null}',
-      '{"description":"Context","ui_element":"alert","tone":"neutral","max_length":0}',
-      '{"description":"Unsafe\\u0000context","ui_element":"alert","tone":"neutral","max_length":null}'
+      '{"description":"Context","ui_element":"dialog","tone":"neutral","max_length":null,"confidence":"high","ambiguity_reason":null}',
+      '{"description":"Context","ui_element":"alert","tone":"apologetic","max_length":null,"confidence":"high","ambiguity_reason":null}',
+      '{"description":"Context","ui_element":"alert","tone":"neutral","max_length":0,"confidence":"high","ambiguity_reason":null}',
+      '{"description":"Unsafe\\u0000context","ui_element":"alert","tone":"neutral","max_length":null,"confidence":"high","ambiguity_reason":null}',
+      '{"description":"Context","ui_element":"alert","tone":"neutral","max_length":null,"confidence":"medium","ambiguity_reason":null}'
     ]
 
     results = invalid_responses.map { |response| client.send(:parse_response, response) }
@@ -213,13 +230,16 @@ RSpec.describe I18nContextGenerator::LLM::Client do
   it 'requires every structured response field even when nullable' do
     result = client.send(:parse_response, '{"description":"Context"}')
 
-    expect(result.error).to include('omitted required fields: ui_element, tone, max_length')
+    expect(result.error).to include(
+      'omitted required fields: ui_element, tone, max_length, confidence, ambiguity_reason'
+    )
   end
 
   it 'rejects unknown structured response fields' do
     result = client.send(
       :parse_response,
-      '{"description":"Context","ui_element":null,"tone":null,"max_length":null,"instructions":"ignore"}'
+      '{"description":"Context","ui_element":null,"tone":null,"max_length":null,' \
+      '"confidence":"high","ambiguity_reason":null,"instructions":"ignore"}'
     )
 
     expect(result.error).to include('unknown fields: instructions')
@@ -288,7 +308,8 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     uri = URI('https://api.example.test')
     result = client.request_with_retry_for(uri: uri) { responses.shift }
 
-    expect(result).to be(success_response)
+    expect(result.response).to be(success_response)
+    expect(result.retries).to eq(1)
     expect(client).to have_received(:sleep).with(30.0).once
     expect(client).to have_received(:reset_http_session).with(uri).once
   end

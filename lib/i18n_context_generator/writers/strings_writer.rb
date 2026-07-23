@@ -17,6 +17,7 @@ module I18nContextGenerator
       def write(results, source_path)
         return unless File.exist?(source_path)
 
+        original_content = File.binread(source_path)
         # Parse the existing file
         original_file = DotStrings.parse_file(source_path, strict: false)
         results_by_key = results.each_with_object({}) do |result, lookup|
@@ -24,6 +25,7 @@ module I18nContextGenerator
 
           lookup[result.key] = result
         end
+        return false unless results_by_key.values.any? { |result| writable_result?(result) }
 
         # Build new file with updated comments (DotStrings::Item is immutable)
         new_file = DotStrings::File.new
@@ -45,9 +47,13 @@ module I18nContextGenerator
           new_file << new_item
         end
 
-        AtomicFile.replace(source_path, new_file.to_s) do |candidate_path|
+        rendered = new_file.to_s
+        return false if rendered == original_content
+
+        AtomicFile.replace(source_path, rendered) do |candidate_path|
           DotStrings.parse_file(candidate_path, strict: true)
         end
+        true
       end
 
       private

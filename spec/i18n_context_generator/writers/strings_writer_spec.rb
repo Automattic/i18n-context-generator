@@ -67,12 +67,13 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
 
         writer.write(results, path)
         first_output = File.read(path)
-        writer.write(results, path)
+        changed = writer.write(results, path)
         second_output = File.read(path)
 
         expect(parsed_comments(path)['settings.title']).to eq("Manual note\nContext: New description")
         expect(second_output.scan('Context:').size).to eq(1)
         expect(second_output).to eq(first_output)
+        expect(changed).to be(false)
       end
     end
 
@@ -125,6 +126,22 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
 
     it 'returns nil for missing files' do
       expect(described_class.new.write([], '/nonexistent/Localizable.strings')).to be_nil
+    end
+
+    it 'does not replace the file when no writable result matches' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, "\"settings.title\" = \"Settings\";\n")
+        original_inode = File.stat(path).ino
+
+        changed = described_class.new.write(
+          [build_result('other.key', 'Other context')],
+          path
+        )
+
+        expect(changed).to be(false)
+        expect(File.stat(path).ino).to eq(original_inode)
+      end
     end
 
     it 'skips errored results and leaves comments unchanged' do

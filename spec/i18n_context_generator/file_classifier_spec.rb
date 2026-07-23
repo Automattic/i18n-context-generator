@@ -15,6 +15,10 @@ RSpec.describe I18nContextGenerator::FileClassifier do
     expect(described_class.android_resource_xml?('resources/layout/screen.xml')).to be(false)
   end
 
+  it 'classifies Apple string catalogs as iOS translation files' do
+    expect(described_class.translation_platform('Resources/Localizable.xcstrings')).to eq(:ios)
+  end
+
   it 'classifies Android manifests and searches them for Android or unknown runs' do
     manifest = 'app/src/main/AndroidManifest.xml'
 

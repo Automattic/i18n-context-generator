@@ -19,6 +19,7 @@ module I18nContextGenerator
       def generate_context(key:, text:, matches:, model: nil, comment: nil,
                            include_file_paths: false, redact_prompts: true,
                            max_prompt_chars: nil)
+        outcome = nil
         model = resolved_model(model)
         prompt = build_prompt(
           key: key,
@@ -29,12 +30,16 @@ module I18nContextGenerator
           redact_prompts: redact_prompts,
           max_prompt_chars: max_prompt_chars
         )
-        response = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
-        handle_response(response)
+        outcome = request_with_retries(uri: @uri) { post_request(model: model, prompt: prompt) }
+        handle_response(outcome.response, retries: outcome.retries)
       rescue PromptPreparationError => e
         ContextResult.new(description: 'Prompt preparation failed', error: e.message)
       rescue StandardError => e
-        ContextResult.new(description: 'API request failed', error: e.message)
+        ContextResult.new(
+          description: 'API request failed',
+          error: e.message,
+          **failure_request_telemetry(e, outcome: outcome)
+        )
       end
 
       private
@@ -48,7 +53,7 @@ module I18nContextGenerator
           },
           body: {
             model: model,
-            max_tokens: 500,
+            max_tokens: MAX_OUTPUT_TOKENS,
             system: SYSTEM_PROMPT,
             messages: [{ role: 'user', content: prompt }],
             output_config: {
@@ -61,29 +66,51 @@ module I18nContextGenerator
         )
       end
 
-      def handle_response(response)
+      def handle_response(response, retries:)
         case response.code.to_i
         when 200
           body = JSON.parse(response.body)
-          handle_successful_response(body)
+          handle_successful_response(body, retries: retries)
         else
-          http_error_result(response)
+          http_error_result(response, retries: retries)
         end
       end
 
-      def handle_successful_response(body)
+      def handle_successful_response(body, retries:)
+        telemetry = usage_telemetry(body, retries: retries)
         case body['stop_reason']
         when 'end_turn'
           content = Array(body['content']).find { |item| item['type'] == 'text' }
-          parse_response(content&.[]('text'))
+          parse_response(content&.[]('text'), telemetry: telemetry)
         when 'refusal'
-          ContextResult.new(description: 'Provider refused request', error: 'Anthropic refused to generate context')
+          ContextResult.new(
+            description: 'Provider refused request',
+            error: 'Anthropic refused to generate context',
+            **telemetry
+          )
         when 'max_tokens'
-          ContextResult.new(description: 'Incomplete response', error: 'Anthropic response reached max_tokens')
+          ContextResult.new(
+            description: 'Incomplete response',
+            error: 'Anthropic response reached max_tokens',
+            **telemetry
+          )
         else
           reason = body['stop_reason'] || 'missing'
-          ContextResult.new(description: 'Incomplete response', error: "Unexpected Anthropic stop reason: #{reason}")
+          ContextResult.new(
+            description: 'Incomplete response',
+            error: "Unexpected Anthropic stop reason: #{reason}",
+            **telemetry
+          )
         end
+      end
+
+      def usage_telemetry(body, retries:)
+        {
+          input_tokens: body.dig('usage', 'input_tokens').to_i,
+          output_tokens: body.dig('usage', 'output_tokens').to_i,
+          retries: retries,
+          request_count: retries + 1
+        }
       end
     end
   end

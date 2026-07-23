@@ -22,7 +22,22 @@ RSpec.describe I18nContextGenerator::CLI do
 
     provider_option = described_class.commands.fetch('extract').options.fetch(:provider)
 
-    expect(provider_option.enum).to eq(%w[anthropic openai])
+    expect(provider_option.enum).to eq(%w[anthropic openai openai_compatible])
+  end
+
+  it 'exposes repeatable singular translation, source, and key options' do
+    options = described_class.commands.fetch('extract').options
+
+    expect(options.fetch(:translation).repeatable).to be(true)
+    expect(options.fetch(:source).repeatable).to be(true)
+    expect(options.fetch(:key).repeatable).to be(true)
+    expect(options.fetch(:translation).aliases).to include('-t')
+    expect(options.fetch(:key).aliases).to include('-k')
+  end
+
+  it 'registers explicit check, plan, preview-diff, and apply workflows' do
+    expect(described_class.commands.keys).to include('check', 'plan', 'preview_diff', 'apply')
+    expect(described_class.map['preview-diff']).to eq(:preview_diff)
   end
 
   describe 'option validation' do
@@ -59,7 +74,30 @@ RSpec.describe I18nContextGenerator::CLI do
       allow(cli).to receive(:options).and_return(config: nil, translations: nil)
 
       expect { cli.send(:validate_options!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
-      expect(cli).to have_received(:say_error).with(/--translations \(-t\) is required/)
+      expect(cli).to have_received(:say_error).with(/--translation \(-t\) is required/)
+    end
+  end
+
+  describe 'list deprecations' do
+    let(:cli) { described_class.allocate }
+
+    before do
+      allow(cli).to receive(:say_error)
+    end
+
+    it 'warns only for legacy plural flags' do
+      allow(cli).to receive(:options).and_return(
+        translations: 'First.strings,Second.strings',
+        keys: 'settings.*,profile.*',
+        source: ['Sources,Shared'],
+        translation: ['Resources,Legacy.xcstrings']
+      )
+
+      cli.send(:warn_deprecated_list_options!)
+
+      expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
+      expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
+      expect(cli).to have_received(:say_error).exactly(2).times
     end
   end
 
@@ -83,6 +121,17 @@ RSpec.describe I18nContextGenerator::CLI do
 
         expect { cli.send(:validate_api_key!) }.to raise_error(SystemExit) { |error| expect(error.status).to eq(1) }
         expect(cli).to have_received(:say_error).with(/OPENAI_API_KEY environment variable is required/)
+      end
+    end
+
+    it 'does not forward or require the OpenAI key for compatible endpoints' do
+      with_env('OPENAI_API_KEY', nil) do
+        allow(cli).to receive(:options).and_return(
+          dry_run: false,
+          provider: 'openai_compatible'
+        )
+
+        expect { cli.send(:validate_api_key!) }.not_to raise_error
       end
     end
   end
@@ -137,6 +186,7 @@ RSpec.describe I18nContextGenerator::CLI do
       schema = I18nContextGenerator::Config::Schema
 
       expect(parsed.dig('llm', 'provider')).to eq(schema.default(:provider))
+      expect(parsed['schema_version']).to eq(schema.default(:schema_version))
       expect(parsed.dig('processing', 'concurrency')).to eq(schema.default(:concurrency))
       expect(parsed.dig('processing', 'max_prompt_chars')).to eq(schema.default(:max_prompt_chars))
       expect(parsed.dig('cache', 'enabled')).to eq(schema.default(:cache_enabled))
@@ -144,6 +194,23 @@ RSpec.describe I18nContextGenerator::CLI do
       expect(parsed.dig('swift', 'functions')).to eq(schema.default(:swift_functions))
       expect(parsed.dig('privacy', 'redact_prompts')).to eq(schema.default(:redact_prompts))
       expect(sample).to include('Custom entries extend the built-in localization functions')
+    end
+  end
+
+  describe I18nContextGenerator::ConfigCommand do
+    it 'uses non-zero exit status for Thor command failures' do
+      expect(described_class.exit_on_failure?).to be(true)
+    end
+
+    it 'validates a schema-versioned configuration file' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'config.yml')
+        File.write(path, "schema_version: 1\nsource:\n  paths:\n    - .\n")
+        command = described_class.new
+
+        expect { command.validate(path) }
+          .to output(/Configuration is valid \(schema version 1\)/).to_stdout
+      end
     end
   end
 
@@ -161,6 +228,47 @@ RSpec.describe I18nContextGenerator::CLI do
 
   describe '#extract' do
     let(:cli) { described_class.allocate }
+
+    it 'honors a workflow stage loaded from configuration' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'check',
+        output_path: 'context.csv'
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+      allow(cli).to receive(:options).and_return(
+        config: '.i18n-context-generator.yml',
+        translation: nil,
+        translations: nil,
+        diff_base: nil
+      )
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      expect { cli.extract }.not_to raise_error
+      expect(config.workflow_stage).to eq('check')
+    end
+
+    it 'lets an explicit workflow command override the configured stage' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'check',
+        output_path: 'context.csv'
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+      allow(cli).to receive(:options).and_return(
+        config: '.i18n-context-generator.yml',
+        translation: nil,
+        translations: nil,
+        diff_base: nil
+      )
+      allow(cli).to receive(:validate_api_key!)
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      expect { cli.apply }.not_to raise_error
+      expect(config.workflow_stage).to eq('apply')
+    end
 
     it 'uses the provider from the loaded config when validating API keys' do
       Dir.mktmpdir do |dir|

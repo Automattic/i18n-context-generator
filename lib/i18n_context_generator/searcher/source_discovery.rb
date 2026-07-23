@@ -97,7 +97,12 @@ module I18nContextGenerator
         pattern = @localization_syntax.ios_single_line_discovery_patterns.find { |candidate| candidate.match?(line) }
         return unless pattern
 
-        build_ios_discovered_entry(file, index, pattern.match(line))
+        build_ios_discovered_entry(
+          file,
+          index,
+          pattern.match(line),
+          comment_match: IOS_COMMENT_ARGUMENT_PATTERN.match(line)
+        )
       end
 
       def extract_ios_multiline_entry(lines, file, start_index, lookahead: 8)
@@ -124,7 +129,7 @@ module I18nContextGenerator
       end
 
       def build_ios_discovered_entry(file, index, match, comment_match: nil, locations: nil)
-        key = match[:key]
+        key = unescape_source_string(match[:key])
         return if key.nil? || key.empty?
 
         text = match.names.include?('text') ? match[:text] : nil
@@ -220,14 +225,7 @@ module I18nContextGenerator
       end
 
       def unescape_source_string(text)
-        return if text.nil?
-
-        text
-          .gsub('\\"', '"')
-          .gsub("\\'", "'")
-          .gsub('\\\\', '\\')
-          .gsub('\\n', "\n")
-          .gsub('\\t', "\t")
+        AppleStringLiteral.decode(text)
       end
     end
   end

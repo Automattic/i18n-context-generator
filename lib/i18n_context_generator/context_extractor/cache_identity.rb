@@ -11,7 +11,8 @@ module I18nContextGenerator
           matches: sorted_cache_matches(matches),
           comment: comment,
           provider: @config.provider,
-          resolved_model: @config.model || LLM::Client.default_model_for(@config.provider),
+          resolved_model: resolved_model,
+          endpoint: @config.endpoint,
           prompt: cache_prompt_settings,
           source_discovery: cache_source_discovery(entry)
         )

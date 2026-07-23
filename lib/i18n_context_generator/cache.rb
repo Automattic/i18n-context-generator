@@ -11,7 +11,7 @@ module I18nContextGenerator
     DEFAULT_DIR = '.i18n-context-generator-cache'
     CACHE_DIR = DEFAULT_DIR # Backward-compatible constant name.
     # Bump this when prompt format, search heuristics, or output schema change
-    CACHE_VERSION = 'v4'
+    CACHE_VERSION = 'v5'
 
     attr_reader :directory
 
