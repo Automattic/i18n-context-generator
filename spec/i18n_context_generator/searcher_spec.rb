@@ -158,6 +158,26 @@ RSpec.describe I18nContextGenerator::Searcher do
             expect(resource_searcher.search('resource.action').map(&:file)).to eq([file])
           end
         end
+
+        it 'matches escaped quotes and follows typed static resources to their usage sites' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'LocalizedResources.swift')
+            File.write(file, <<~'SWIFT')
+              enum Copy {
+                static let quoted = LocalizedStringResource("Say \"Hi\"")
+                static let confirm: LocalizedStringResource = "confirm.action"
+              }
+              Text(Copy.quoted)
+              Button(Copy.confirm) {}
+            SWIFT
+            resource_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(resource_searcher.search('Say "Hi"').map(&:line)).to contain_exactly(2, 5)
+            expect(resource_searcher.search('confirm.action').map(&:line)).to contain_exactly(3, 6)
+          end
+        end
       end
 
       context 'with Text() pattern' do
@@ -408,6 +428,25 @@ RSpec.describe I18nContextGenerator::Searcher do
               locations: ["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4", "#{file}:5"]
             ),
             have_attributes(key: 'resource.action', text: nil, comment: nil)
+          )
+        end
+      end
+
+      it 'decodes escaped quotes in localized resource keys and default values' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'EscapedLocalizedResources.swift')
+          File.write(file, <<~'SWIFT')
+            let title = LocalizedStringResource(
+              "Say \"Hi\"",
+              defaultValue: "Press \"Now\""
+            )
+          SWIFT
+          resource_searcher = described_class.new(
+            source_paths: [dir], ignore_patterns: [], platform: :ios
+          )
+
+          expect(resource_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(key: 'Say "Hi"', text: 'Press "Now"')
           )
         end
       end

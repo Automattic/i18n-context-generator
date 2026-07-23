@@ -129,7 +129,7 @@ module I18nContextGenerator
       end
 
       def build_ios_discovered_entry(file, index, match, comment_match: nil, locations: nil)
-        key = match[:key]
+        key = unescape_source_string(match[:key])
         return if key.nil? || key.empty?
 
         text = match.names.include?('text') ? match[:text] : nil

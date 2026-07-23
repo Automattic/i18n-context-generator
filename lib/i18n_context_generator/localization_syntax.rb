@@ -14,31 +14,33 @@ module I18nContextGenerator
     ].freeze
 
     IOS_STATIC_SEARCH_BUILDERS = [
-      ->(key) { "LocalizedStringKey\\s*\\(\\s*[\"']#{key}[\"']" },
-      ->(key) { "LocalizedStringKey\\s*=\\s*[\"']#{key}[\"']" },
-      ->(key) { ":\\s*LocalizedStringResource\\s*=\\s*[\"']#{key}[\"']" },
-      ->(key) { "[\"']#{key}[\"']\\.localized" }
+      ->(key) { "LocalizedStringKey\\s*\\(\\s*\"#{key}\"" },
+      ->(key) { "LocalizedStringKey\\s*=\\s*\"#{key}\"" },
+      ->(key) { ":\\s*LocalizedStringResource\\s*=\\s*\"#{key}\"" },
+      ->(key) { "\"#{key}\"\\.localized" }
     ].freeze
+    SWIFT_STRING_BODY_PATTERN = '(?:\\\\.|[^"\\\\])*'
+    private_constant :SWIFT_STRING_BODY_PATTERN
 
     IOS_STATIC_SINGLE_LINE_DISCOVERY_PATTERNS = [
-      /LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)/,
-      /:\s*LocalizedStringKey\s*=\s*["'](?<key>[^"']+)["']/,
-      /:\s*LocalizedStringResource\s*=\s*["'](?<key>[^"']+)["']/,
-      /["'](?<key>[^"']+)["']\.localized\b/
+      /LocalizedStringKey\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"\s*\)/,
+      /:\s*LocalizedStringKey\s*=\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"/,
+      /:\s*LocalizedStringResource\s*=\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"/,
+      /"(?<key>#{SWIFT_STRING_BODY_PATTERN})"\.localized\b/
     ].freeze
 
     LOCALIZED_RESOURCE_SINGLE_LINE_DISCOVERY_PATTERNS = [
-      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["'][^\n]*?\bdefaultValue:\s*["'](?<text>[^"']*)["']/,
-      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["']/
+      /LocalizedStringResource\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"[^\n]*?\bdefaultValue:\s*"(?<text>#{SWIFT_STRING_BODY_PATTERN})"/,
+      /LocalizedStringResource\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"/
     ].freeze
 
     IOS_STATIC_MULTILINE_DISCOVERY_PATTERNS = [
-      /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)[\s\S]*?\)/
+      /Text\s*\(\s*LocalizedStringKey\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"\s*\)[\s\S]*?\)/
     ].freeze
 
     LOCALIZED_RESOURCE_MULTILINE_DISCOVERY_PATTERNS = [
-      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["'][\s\S]*?\bdefaultValue:\s*["'](?<text>[^"']*)["']/,
-      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["']/
+      /LocalizedStringResource\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"[\s\S]*?\bdefaultValue:\s*"(?<text>#{SWIFT_STRING_BODY_PATTERN})"/,
+      /LocalizedStringResource\s*\(\s*"(?<key>#{SWIFT_STRING_BODY_PATTERN})"/
     ].freeze
 
     OPTIONAL_ARGUMENT_LABEL_PATTERN = '(?:[A-Za-z_]\w*\s*:\s*)?'
@@ -53,6 +55,20 @@ module I18nContextGenerator
     def self.functions_with_defaults(functions)
       configured = Array(functions).map(&:strip).reject(&:empty?)
       (DEFAULT_SWIFT_FUNCTIONS + configured).uniq { |function| function.sub(/\(\s*\z/, '') }.freeze
+    end
+
+    def self.swift_string_content_pattern(value)
+      encoded = value.each_char.map do |character|
+        case character
+        when '\\' then '\\\\'
+        when '"' then '\\"'
+        when "\n" then '\n'
+        when "\r" then '\r'
+        when "\t" then '\t'
+        else character
+        end
+      end.join
+      Regexp.escape(encoded)
     end
 
     def initialize(swift_functions: nil)
@@ -73,13 +89,13 @@ module I18nContextGenerator
     end
 
     def ios_search_patterns(key)
-      escaped_key = Regexp.escape(key)
+      escaped_key = self.class.swift_string_content_pattern(key)
       function_patterns = swift_function_key_patterns(escaped_key)
       function_patterns + IOS_STATIC_SEARCH_BUILDERS.map { |builder| builder.call(escaped_key) }
     end
 
     def ios_multiline_search_patterns(key)
-      escaped_key = Regexp.escape(key)
+      escaped_key = self.class.swift_string_content_pattern(key)
       swift_function_key_patterns(escaped_key).map { |pattern| Regexp.new(pattern) }
     end
 
@@ -117,7 +133,9 @@ module I18nContextGenerator
       @ios_wrapper_definition_pattern ||= begin
         functions = (@swift_functions.map { |function| swift_call_prefix(function) } +
           ['LocalizedStringKey\\s*\\(']).join('|')
-        /\bstatic\s+(?:let|var)\s+(?<member_name>\w+)\s*=\s*(?:#{functions})/
+        constructor = "\\s*=\\s*(?:#{functions})"
+        typed_resource = '\s*:\s*LocalizedStringResource\s*=\s*"'
+        /\bstatic\s+(?:let|var)\s+(?<member_name>\w+)(?:#{constructor}|#{typed_resource})/
       end
     end
 
@@ -126,7 +144,7 @@ module I18nContextGenerator
     end
 
     def swift_writer_patterns(key)
-      escaped_key = Regexp.escape(key)
+      escaped_key = self.class.swift_string_content_pattern(key)
       comment = 'comment:\\s*"(?:\\\\.|[^"\\\\])*"'
 
       patterns = @swift_functions.map do |function|
@@ -146,15 +164,15 @@ module I18nContextGenerator
       @swift_functions.flat_map do |function|
         prefix = swift_key_argument_prefix(function)
         [
-          Regexp.new("#{prefix}\\s*@?[\"'](?<key>[^\"']+)[\"']#{tail}comment:\\s*[\"'](?<comment>(?:\\\\.|[^\"'\\\\])*)[\"']"),
-          Regexp.new("#{prefix}\\s*@?[\"'](?<key>[^\"']+)[\"']")
+          Regexp.new("#{prefix}\\s*@?\"(?<key>#{SWIFT_STRING_BODY_PATTERN})\"#{tail}comment:\\s*\"(?<comment>#{SWIFT_STRING_BODY_PATTERN})\""),
+          Regexp.new("#{prefix}\\s*@?\"(?<key>#{SWIFT_STRING_BODY_PATTERN})\"")
         ]
       end
     end
 
     def swift_function_key_patterns(escaped_key)
       @swift_functions.map do |function|
-        "#{swift_key_argument_prefix(function)}@?[\"']#{escaped_key}[\"']"
+        "#{swift_key_argument_prefix(function)}@?\"#{escaped_key}\""
       end
     end
 

@@ -254,7 +254,7 @@ module I18nContextGenerator
     # Find matches where localization calls span multiple lines
     # e.g., NSLocalizedString(\n    "key",\n    comment: "...")
     def find_multiline_ios_matches(lines, patterns, key)
-      key_pattern = /["']#{Regexp.escape(key)}["']/
+      key_pattern = /@?"#{LocalizationSyntax.swift_string_content_pattern(key)}"/
       call_patterns = @localization_syntax.ios_multiline_search_patterns(key)
 
       lines.each_with_index.filter_map do |line, index|
