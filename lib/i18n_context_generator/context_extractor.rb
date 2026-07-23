@@ -422,6 +422,11 @@ module I18nContextGenerator
           context_prefix: @config.context_prefix,
           context_mode: @config.context_mode
         )
+      when '.xcstrings'
+        Writers::XcstringsWriter.new(
+          context_prefix: @config.context_prefix,
+          context_mode: @config.context_mode
+        )
       when '.xml'
         if FileClassifier.android_translation_file?(path)
           Writers::AndroidXmlWriter.new(

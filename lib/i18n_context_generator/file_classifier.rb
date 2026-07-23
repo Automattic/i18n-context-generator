@@ -41,7 +41,7 @@ module I18nContextGenerator
 
     def translation_platform(path)
       case File.extname(path).downcase
-      when '.strings' then :ios
+      when '.strings', '.xcstrings' then :ios
       when '.xml' then :android if android_translation_file?(path)
       end
     end

@@ -142,6 +142,24 @@ RSpec.describe I18nContextGenerator::Searcher do
         end
       end
 
+      context 'with LocalizedStringResource patterns' do
+        it 'finds constructor calls and typed string-literal assignments' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'LocalizedResources.swift')
+            File.write(file, <<~SWIFT)
+              let title = LocalizedStringResource("resource.title", comment: "Screen title")
+              let action: LocalizedStringResource = "resource.action"
+            SWIFT
+            resource_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(resource_searcher.search('resource.title').map(&:file)).to eq([file])
+            expect(resource_searcher.search('resource.action').map(&:file)).to eq([file])
+          end
+        end
+      end
+
       context 'with Text() pattern' do
         it 'finds SwiftUI Text with key' do
           matches = searcher.search('quickstart.header')
@@ -365,6 +383,33 @@ RSpec.describe I18nContextGenerator::Searcher do
           text: nil,
           comment: nil
         )
+      end
+
+      it 'discovers LocalizedStringResource default values, comments, and typed literals' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'LocalizedResources.swift')
+          File.write(file, <<~SWIFT)
+            let title = LocalizedStringResource(
+              "resource.title",
+              defaultValue: "Account",
+              comment: "Account screen title"
+            )
+            let action: LocalizedStringResource = "resource.action"
+          SWIFT
+          resource_searcher = described_class.new(
+            source_paths: [dir], ignore_patterns: [], platform: :ios
+          )
+
+          expect(resource_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(
+              key: 'resource.title',
+              text: 'Account',
+              comment: 'Account screen title',
+              locations: ["#{file}:1", "#{file}:2", "#{file}:3", "#{file}:4", "#{file}:5"]
+            ),
+            have_attributes(key: 'resource.action', text: nil, comment: nil)
+          )
+        end
       end
 
       it 'captures comments and every source line in multiline localization calls' do

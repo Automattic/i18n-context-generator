@@ -38,13 +38,21 @@ module I18nContextGenerator
           next unless translatable?(array_element)
 
           array_name = array_element.attributes['name']
+          parent_comment = find_preceding_comment(array_element)
           array_element.elements.to_a('item').each_with_index do |item, index|
             key = AndroidResource.composite_key(array_name, type: :array, index: index)
+            item_comment = find_preceding_comment(item)
             entries << build_entry(
               key: key,
               text: unescape_android_string(inner_text(item)),
               source_file: path,
-              metadata: { array: array_name, index: index, resource_type: :array },
+              metadata: {
+                array: array_name,
+                index: index,
+                resource_type: :array,
+                parent_comment: parent_comment,
+                comment: combined_comment(parent_comment, item_comment)
+              }.compact,
               resource_index: resource_index
             )
           end
@@ -55,14 +63,22 @@ module I18nContextGenerator
           next unless translatable?(plural_element)
 
           plural_name = plural_element.attributes['name']
+          parent_comment = find_preceding_comment(plural_element)
           plural_element.elements.each('item') do |item|
             quantity = item.attributes['quantity']
             key = AndroidResource.composite_key(plural_name, type: :plural, quantity: quantity)
+            item_comment = find_preceding_comment(item)
             entries << build_entry(
               key: key,
               text: unescape_android_string(inner_text(item)),
               source_file: path,
-              metadata: { plural: plural_name, quantity: quantity, resource_type: :plural },
+              metadata: {
+                plural: plural_name,
+                quantity: quantity,
+                resource_type: :plural,
+                parent_comment: parent_comment,
+                comment: combined_comment(parent_comment, item_comment)
+              }.compact,
               resource_index: resource_index
             )
           end
@@ -108,6 +124,10 @@ module I18nContextGenerator
           prev = prev.previous_sibling
         end
         nil
+      end
+
+      def combined_comment(parent_comment, item_comment)
+        [parent_comment, item_comment].compact.uniq.join("\n").then { |comment| comment unless comment.empty? }
       end
 
       def translatable?(element)

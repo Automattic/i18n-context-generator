@@ -97,7 +97,12 @@ module I18nContextGenerator
         pattern = @localization_syntax.ios_single_line_discovery_patterns.find { |candidate| candidate.match?(line) }
         return unless pattern
 
-        build_ios_discovered_entry(file, index, pattern.match(line))
+        build_ios_discovered_entry(
+          file,
+          index,
+          pattern.match(line),
+          comment_match: IOS_COMMENT_ARGUMENT_PATTERN.match(line)
+        )
       end
 
       def extract_ios_multiline_entry(lines, file, start_index, lookahead: 8)

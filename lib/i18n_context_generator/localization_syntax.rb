@@ -10,22 +10,35 @@ module I18nContextGenerator
       NSLocalizedString
       String(localized:
       Text(
+      LocalizedStringResource(
     ].freeze
 
     IOS_STATIC_SEARCH_BUILDERS = [
       ->(key) { "LocalizedStringKey\\s*\\(\\s*[\"']#{key}[\"']" },
       ->(key) { "LocalizedStringKey\\s*=\\s*[\"']#{key}[\"']" },
+      ->(key) { ":\\s*LocalizedStringResource\\s*=\\s*[\"']#{key}[\"']" },
       ->(key) { "[\"']#{key}[\"']\\.localized" }
     ].freeze
 
     IOS_STATIC_SINGLE_LINE_DISCOVERY_PATTERNS = [
       /LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)/,
       /:\s*LocalizedStringKey\s*=\s*["'](?<key>[^"']+)["']/,
+      /:\s*LocalizedStringResource\s*=\s*["'](?<key>[^"']+)["']/,
       /["'](?<key>[^"']+)["']\.localized\b/
+    ].freeze
+
+    LOCALIZED_RESOURCE_SINGLE_LINE_DISCOVERY_PATTERNS = [
+      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["'][^\n]*?\bdefaultValue:\s*["'](?<text>[^"']*)["']/,
+      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["']/
     ].freeze
 
     IOS_STATIC_MULTILINE_DISCOVERY_PATTERNS = [
       /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)[\s\S]*?\)/
+    ].freeze
+
+    LOCALIZED_RESOURCE_MULTILINE_DISCOVERY_PATTERNS = [
+      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["'][\s\S]*?\bdefaultValue:\s*["'](?<text>[^"']*)["']/,
+      /LocalizedStringResource\s*\(\s*["'](?<key>[^"']+)["']/
     ].freeze
 
     OPTIONAL_ARGUMENT_LABEL_PATTERN = '(?:[A-Za-z_]\w*\s*:\s*)?'
@@ -83,12 +96,16 @@ module I18nContextGenerator
 
     def ios_single_line_discovery_patterns
       @ios_single_line_discovery_patterns ||=
-        (function_discovery_patterns(multiline: false) + IOS_STATIC_SINGLE_LINE_DISCOVERY_PATTERNS).freeze
+        (LOCALIZED_RESOURCE_SINGLE_LINE_DISCOVERY_PATTERNS +
+          function_discovery_patterns(multiline: false) +
+          IOS_STATIC_SINGLE_LINE_DISCOVERY_PATTERNS).freeze
     end
 
     def ios_multiline_discovery_patterns
       @ios_multiline_discovery_patterns ||=
-        (function_discovery_patterns(multiline: true) + IOS_STATIC_MULTILINE_DISCOVERY_PATTERNS).freeze
+        (LOCALIZED_RESOURCE_MULTILINE_DISCOVERY_PATTERNS +
+          function_discovery_patterns(multiline: true) +
+          IOS_STATIC_MULTILINE_DISCOVERY_PATTERNS).freeze
     end
 
     def ios_call_start_patterns
