@@ -3,6 +3,7 @@ PATH
   specs:
     i18n-context-generator (0.4.0)
       concurrent-ruby (~> 1.2)
+      csv (~> 3.3)
       dotstrings (~> 0.6)
       oj (~> 3.16)
       rexml (~> 3.2)
@@ -32,6 +33,7 @@ GEM
     bigdecimal (4.0.1)
     concurrent-ruby (1.3.6)
     connection_pool (3.0.2)
+    csv (3.3.5)
     diff-lcs (1.6.2)
     dotstrings (0.6.0)
     drb (2.2.3)

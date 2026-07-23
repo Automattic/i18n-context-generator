@@ -41,7 +41,9 @@ module I18nContextGenerator
           i += 1
         end
 
-        File.write(source_path, output_lines.join)
+        AtomicFile.replace(source_path, output_lines.join) do |candidate_path|
+          REXML::Document.new(File.read(candidate_path, encoding: 'UTF-8'))
+        end
       end
 
       private

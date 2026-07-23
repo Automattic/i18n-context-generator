@@ -8,6 +8,18 @@ RSpec.describe I18nContextGenerator::Writers::AndroidXmlWriter do
   end
 
   describe '#write' do
+    it 'preserves the source file permissions' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, '<resources><string name="app_name">My App</string></resources>')
+        File.chmod(0o640, path)
+
+        described_class.new.write([build_result('app_name', 'The app display name')], path)
+
+        expect(File.stat(path).mode & 0o777).to eq(0o640)
+      end
+    end
+
     it 'adds context comments above single-line <string> elements' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')

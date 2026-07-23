@@ -76,6 +76,25 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
       end
     end
 
+    it 'escapes comment terminators in generated context and remains idempotent' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, '"settings.title" = "Settings";')
+
+        writer = described_class.new
+        results = [build_result('settings.title', 'Shown after */ completes the task')]
+
+        writer.write(results, path)
+        first_output = File.read(path)
+        writer.write(results, path)
+
+        expect(parsed_comments(path)['settings.title']).to eq(
+          'Context: Shown after * / completes the task'
+        )
+        expect(File.read(path)).to eq(first_output)
+      end
+    end
+
     it 'skips placeholder descriptions and leaves comments unchanged' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'Localizable.strings')
@@ -126,6 +145,18 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
 
         expect(parsed_comments(english_path)['greeting']).to eq('Context: English context')
         expect(parsed_comments(spanish_path)['greeting']).to eq('Context: Spanish context')
+      end
+    end
+
+    it 'preserves the source file permissions' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, '"settings.title" = "Settings";')
+        File.chmod(0o640, path)
+
+        described_class.new.write([build_result('settings.title', 'Settings screen title')], path)
+
+        expect(File.stat(path).mode & 0o777).to eq(0o640)
       end
     end
   end

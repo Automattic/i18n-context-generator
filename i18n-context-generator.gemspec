@@ -19,6 +19,7 @@ Gem::Specification.new do |spec|
   spec.executables = ['i18n-context-generator']
 
   spec.add_dependency 'concurrent-ruby', '~> 1.2'
+  spec.add_dependency 'csv', '~> 3.3'
   spec.add_dependency 'dotstrings', '~> 0.6'
   spec.add_dependency 'oj', '~> 3.16'
   spec.add_dependency 'rexml', '~> 3.2'

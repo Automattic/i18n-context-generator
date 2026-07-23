@@ -62,6 +62,8 @@ module I18nContextGenerator
     def extract
       validate_options!
       config = Config.load(options)
+      config.validate!
+      validate_destination!(config)
       validate_api_key!(provider: config.provider, dry_run: config.dry_run)
       validate_diff_base!(base_ref: config.diff_base) if config.diff_base
       extractor = ContextExtractor.new(config)
@@ -126,6 +128,13 @@ module I18nContextGenerator
       exit 1
     end
 
+    def validate_destination!(config)
+      return if config.dry_run
+      return if config.output_path || config.write_back || config.write_back_to_code
+
+      raise Error, 'A non-dry extraction requires --output, --write-back, or --write-back-to-code'
+    end
+
     def validate_diff_base!(base_ref: options[:diff_base])
       unless GitDiff.available?
         say_error 'Error: --diff-base requires a git repository'
@@ -170,11 +179,9 @@ module I18nContextGenerator
           paths:
             - ios/MyApp/
             # - android/app/src/main/java/
+          # These entries extend the built-in dependency, build, and test ignores.
           ignore:
-            - "**/Pods/**"
-            - "**/build/**"
             - "**/*.generated.*"
-            - "**/*Tests*"
 
         # LLM configuration
         llm:

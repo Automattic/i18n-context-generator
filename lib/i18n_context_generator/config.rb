@@ -13,12 +13,16 @@ module I18nContextGenerator
 
     DEFAULT_CONTEXT_PREFIX = 'Context: '
     DEFAULT_CONTEXT_MODE = 'replace' # "replace" or "append"
+    VALID_PROVIDERS = %w[anthropic openai].freeze
+    VALID_OUTPUT_FORMATS = %w[csv json].freeze
+    VALID_CONTEXT_MODES = %w[replace append].freeze
+    VALID_DISCOVERY_MODES = %w[auto translations source].freeze
 
     def initialize(**attrs)
       @translations = fetch_defaulting_value(attrs, :translations, [])
       @source_paths = fetch_defaulting_value(attrs, :source_paths, ['.'])
       @source_line_filter = fetch_config_value(attrs, :source_line_filter, nil)
-      @ignore_patterns = fetch_defaulting_value(attrs, :ignore_patterns, [])
+      @ignore_patterns = self.class.merge_ignore_patterns(fetch_defaulting_value(attrs, :ignore_patterns, []))
       @provider = fetch_defaulting_value(attrs, :provider, 'anthropic')
       @model = fetch_config_value(attrs, :model, nil)
       @concurrency = fetch_defaulting_value(attrs, :concurrency, 5)
@@ -47,6 +51,21 @@ module I18nContextGenerator
       %w[NSLocalizedString String(localized: Text(]
     end
 
+    def validate!
+      errors = []
+      validate_integer(errors, :concurrency, @concurrency, minimum: 1)
+      validate_integer(errors, :context_lines, @context_lines, minimum: 0)
+      validate_integer(errors, :max_matches_per_key, @max_matches_per_key, minimum: 1)
+      validate_inclusion(errors, :provider, @provider, VALID_PROVIDERS)
+      validate_inclusion(errors, :output_format, @output_format, VALID_OUTPUT_FORMATS)
+      validate_inclusion(errors, :context_mode, @context_mode, VALID_CONTEXT_MODES)
+      validate_inclusion(errors, :discovery_mode, @discovery_mode, VALID_DISCOVERY_MODES)
+
+      raise Error, "Invalid configuration: #{errors.join('; ')}" if errors.any?
+
+      self
+    end
+
     def self.load(options)
       if options[:config] && File.exist?(options[:config])
         from_file(options[:config]).merge_cli(options)
@@ -61,7 +80,7 @@ module I18nContextGenerator
       attrs = {
         translations: parse_translations(yaml['translations']),
         source_paths: yaml.dig('source', 'paths') || ['.'],
-        ignore_patterns: yaml.dig('source', 'ignore') || default_ignore_patterns,
+        ignore_patterns: yaml.dig('source', 'ignore') || [],
         provider: yaml.dig('llm', 'provider') || 'anthropic',
         model: yaml.dig('llm', 'model'),
         concurrency: yaml.dig('processing', 'concurrency') || 5,
@@ -102,7 +121,7 @@ module I18nContextGenerator
       attrs = {
         translations: translations,
         source_paths: source_paths,
-        ignore_patterns: default_ignore_patterns,
+        ignore_patterns: [],
         provider: options[:provider] || 'anthropic',
         model: options[:model],
         concurrency: options[:concurrency] || 5,
@@ -172,6 +191,10 @@ module I18nContextGenerator
       ]
     end
 
+    def self.merge_ignore_patterns(patterns)
+      (default_ignore_patterns + Array(patterns)).compact.uniq
+    end
+
     private
 
     def fetch_config_value(attrs, key, default)
@@ -186,6 +209,18 @@ module I18nContextGenerator
       return default unless attrs.key?(key)
 
       attrs[key].nil? ? default : attrs[key]
+    end
+
+    def validate_integer(errors, name, value, minimum:)
+      return if value.is_a?(Integer) && value >= minimum
+
+      errors << "#{name} must be an integer greater than or equal to #{minimum}"
+    end
+
+    def validate_inclusion(errors, name, value, allowed)
+      return if allowed.include?(value)
+
+      errors << "#{name} must be one of: #{allowed.join(', ')}"
     end
 
     def merge_cli_scalar_options(options)

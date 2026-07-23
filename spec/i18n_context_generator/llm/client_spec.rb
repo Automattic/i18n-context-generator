@@ -127,6 +127,27 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     expect(result.error).to be_nil
   end
 
+  it 'marks non-JSON responses as errors' do
+    result = client.send(:parse_response, 'The title is shown on the settings screen.')
+
+    expect(result.description).to eq('Failed to parse response')
+    expect(result.error).to eq('Response did not contain a valid JSON object')
+  end
+
+  it 'marks malformed JSON responses as errors' do
+    result = client.send(:parse_response, '{"description":"Settings title"')
+
+    expect(result.description).to eq('Failed to parse response')
+    expect(result.error).to eq('Response did not contain a valid JSON object')
+  end
+
+  it 'marks structured responses without a description as errors' do
+    result = client.send(:parse_response, '{"ui_element":"title","tone":"neutral"}')
+
+    expect(result.description).to eq('Failed to parse response')
+    expect(result.error).to eq('Response JSON did not contain a description')
+  end
+
   it 'redacts 32-character hex tokens without redacting UUIDs' do
     text = [
       'checksum=0123456789abcdef0123456789abcdef',

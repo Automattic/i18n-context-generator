@@ -5,7 +5,7 @@ module I18nContextGenerator
   class Cache
     CACHE_DIR = '.i18n-context-generator-cache'
     # Bump this when prompt format, search heuristics, or output schema change
-    CACHE_VERSION = 'v2'
+    CACHE_VERSION = 'v3'
 
     def initialize(enabled: true)
       @enabled = enabled
@@ -26,6 +26,7 @@ module I18nContextGenerator
 
     def set(key, text, result, context: nil)
       return unless @enabled
+      return if result[:error] || result['error']
 
       path = cache_path(key, text, context)
       File.write(path, Oj.dump(result, indent: 2, mode: :compat))

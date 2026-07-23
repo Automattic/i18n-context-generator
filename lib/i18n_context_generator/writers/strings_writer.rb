@@ -43,24 +43,29 @@ module I18nContextGenerator
           new_file << new_item
         end
 
-        # Write back to file
-        File.write(source_path, new_file.to_s)
+        AtomicFile.replace(source_path, new_file.to_s) do |candidate_path|
+          DotStrings.parse_file(candidate_path, strict: true)
+        end
       end
 
       private
 
       def build_comment(existing_comment, context_description)
-        context_line = "#{@context_prefix}#{context_description}"
+        context_line = sanitize_comment("#{@context_prefix}#{context_description}")
 
         if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
           context_line
         elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
           # Replace existing context line (idempotent update)
-          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
+          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/) { context_line }
         else
           # Append context to existing comment
           "#{existing_comment}\n#{context_line}"
         end
+      end
+
+      def sanitize_comment(comment)
+        comment.gsub('*/', '* /')
       end
     end
   end

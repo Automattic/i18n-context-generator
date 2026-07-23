@@ -185,6 +185,14 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       allow(I18nContextGenerator::PlatformValidator).to receive(:new).and_return(validator)
     end
 
+    it 'validates programmatic configuration without requiring a CLI destination' do
+      config = I18nContextGenerator::Config.new(translations: [], concurrency: 0)
+      extractor = described_class.new(config)
+
+      expect { extractor.run }.to raise_error(I18nContextGenerator::Error, /concurrency/)
+      expect(I18nContextGenerator::PlatformValidator).not_to have_received(:new)
+    end
+
     it 'prints a message and exits when no source entries are found in source-first auto mode' do
       extractor = described_class.new(I18nContextGenerator::Config.new(translations: []))
 
@@ -301,6 +309,67 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
           }
         )
       )
+    end
+
+    it 'expands discovered Android plural and array resources to their translation children' do
+      config = I18nContextGenerator::Config.new(
+        translations: ['strings.xml'],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entries = [
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'likes',
+          file: 'Post.kt',
+          line: 10,
+          resource_type: :plural
+        ),
+        I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+          key: 'days',
+          file: 'Calendar.kt',
+          line: 20,
+          resource_type: :array
+        )
+      ]
+      translation_entries = [
+        build_entry('likes:one', '%d like', metadata: { plural: 'likes', quantity: 'one' }),
+        build_entry('likes:other', '%d likes', metadata: { plural: 'likes', quantity: 'other' }),
+        build_entry('days[0]', 'Monday', metadata: { array: 'days', index: 0 })
+      ]
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: discovered_entries)
+
+      allow(extractor).to receive_messages(searcher: searcher, load_translations: translation_entries)
+
+      entries = extractor.send(:load_source_entries)
+
+      expect(entries.map(&:key)).to eq(%w[likes:one likes:other days[0]])
+      expect(entries.map { |entry| entry.metadata[:resource_type] }).to eq(%i[plural plural array])
+      expect(entries.map { |entry| entry.metadata[:source_location] })
+        .to eq(['Post.kt:10', 'Post.kt:10', 'Calendar.kt:20'])
+    end
+
+    it 'keeps resource type metadata for source-only Android collections' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: ['Sources/'],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      discovered_entry = I18nContextGenerator::Searcher::DiscoveredLocalization.new(
+        key: 'likes',
+        file: 'Post.kt',
+        line: 10,
+        resource_type: :plural
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher, discover_localization_entries: [discovered_entry])
+
+      allow(extractor).to receive(:searcher).and_return(searcher)
+
+      entry = extractor.send(:load_source_entries).first
+
+      expect(entry).to have_attributes(key: 'likes', text: 'likes')
+      expect(entry.metadata).to include(resource_type: :plural, source_location: 'Post.kt:10')
     end
 
     it 'filters source-discovered entries by the configured source line filter' do
@@ -485,6 +554,35 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       )
     end
 
+    it 'does not cache rate-limit, transport, or parse failures so later runs can retry them' do
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache = instance_double(I18nContextGenerator::Cache, get: nil)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+      llm_results = [
+        I18nContextGenerator::LLM::ContextResult.new(
+          description: 'Rate limited',
+          error: 'Rate limit exceeded'
+        ),
+        I18nContextGenerator::LLM::ContextResult.new(
+          description: 'API request failed',
+          error: 'Request timed out'
+        ),
+        I18nContextGenerator::LLM::ContextResult.new(
+          description: 'Failed to parse response',
+          error: 'Response did not contain a valid JSON object'
+        )
+      ]
+
+      allow(cache).to receive(:set)
+      allow(llm).to receive(:generate_context).and_return(*llm_results)
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      results = llm_results.map { extractor.send(:process_entry, entry) }
+
+      expect(results.map(&:error)).to eq(llm_results.map(&:error))
+      expect(cache).not_to have_received(:set)
+    end
+
     it 'prefers the discovered source location over usage matches when present' do
       source_entry = build_entry(
         'settings.title',
@@ -551,6 +649,32 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(llm).not_to have_received(:generate_context)
       expect(result.description).to eq('Cached description')
       expect(result.locations).to eq(['/tmp/SettingsViewController.swift:10'])
+    end
+
+    it 'ignores cached failures and calls the llm again' do
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache = instance_double(
+        I18nContextGenerator::Cache,
+        get: {
+          'key' => 'settings.title',
+          'text' => 'Settings',
+          'description' => 'API request failed',
+          'locations' => [],
+          'error' => 'timeout'
+        },
+        set: nil
+      )
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+      allow(llm).to receive(:generate_context).and_return(
+        I18nContextGenerator::LLM::ContextResult.new(description: 'Fresh description')
+      )
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      result = extractor.send(:process_entry, entry)
+
+      expect(llm).to have_received(:generate_context)
+      expect(result.description).to eq('Fresh description')
+      expect(result.error).to be_nil
     end
   end
 

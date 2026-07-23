@@ -19,11 +19,23 @@ module I18nContextGenerator
         /Text\s*\(\s*LocalizedStringKey\s*\(\s*["'](?<key>[^"']+)["']\s*\)\s*\)/
       ].freeze
 
-      ANDROID_DISCOVERY_PATTERN = %r{
-        R\.string\.(\w+)\b|
-        @string/([\w.]+)\b|
-        [(\s,=]string\.(\w+)\b
-      }x
+      ANDROID_DISCOVERY_PATTERNS = {
+        string: %r{
+          R\.string\.(\w+)\b|
+          @string/([\w.]+)\b|
+          [(\s,=]string\.(\w+)\b
+        }x,
+        plural: %r{
+          R\.plurals\.(\w+)\b|
+          @plurals/([\w.]+)\b|
+          [(\s,=]plurals\.(\w+)\b
+        }x,
+        array: %r{
+          R\.array\.(\w+)\b|
+          @array/([\w.]+)\b|
+          [(\s,=]array\.(\w+)\b
+        }x
+      }.freeze
 
       def discover_localization_entries
         entries = discover_files.flat_map do |file|
@@ -55,15 +67,16 @@ module I18nContextGenerator
 
       def deduplicate_discovered_entries(entries)
         entries.each_with_object({}) do |entry, deduplicated_entries|
-          existing_entry = deduplicated_entries[entry.key]
+          identity = [entry.resource_type, entry.key]
+          existing_entry = deduplicated_entries[identity]
           if existing_entry.nil?
-            deduplicated_entries[entry.key] = entry
+            deduplicated_entries[identity] = entry
             next
           end
 
           next if !existing_entry.comment.to_s.empty? || entry.comment.to_s.empty?
 
-          deduplicated_entries[entry.key] = entry
+          deduplicated_entries[identity] = entry
         end.values
       end
 
@@ -79,7 +92,7 @@ module I18nContextGenerator
       end
 
       def discover_ios_entries(file)
-        lines = cached_file_lines(file)
+        lines = searchable_file_lines(file)
         entries = []
         index = 0
 
@@ -149,7 +162,7 @@ module I18nContextGenerator
       end
 
       def discover_android_entries(file)
-        lines = cached_file_lines(file)
+        lines = searchable_file_lines(file)
         entries = []
 
         lines.each_with_index do |line, index|
@@ -160,15 +173,18 @@ module I18nContextGenerator
       end
 
       def extract_android_entries_from_line(file, index, line)
-        line.scan(ANDROID_DISCOVERY_PATTERN).filter_map do |captures|
-          key = captures.compact.first
-          next if key.nil? || key.empty?
+        ANDROID_DISCOVERY_PATTERNS.flat_map do |resource_type, pattern|
+          line.scan(pattern).filter_map do |captures|
+            key = captures.compact.first
+            next if key.nil? || key.empty?
 
-          DiscoveredLocalization.new(
-            key: key,
-            file: file,
-            line: index + 1
-          )
+            DiscoveredLocalization.new(
+              key: key,
+              file: file,
+              line: index + 1,
+              resource_type: resource_type
+            )
+          end
         end
       end
 

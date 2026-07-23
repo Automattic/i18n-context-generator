@@ -2,6 +2,7 @@
 
 require_relative 'context_extractor/source_filters'
 require_relative 'context_extractor/run_logging'
+require_relative 'context_extractor/source_entries'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -10,6 +11,7 @@ module I18nContextGenerator
     include Writers::Helpers
     include SourceFilters
     include RunLogging
+    include SourceEntries
 
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
@@ -48,6 +50,7 @@ module I18nContextGenerator
     end
 
     def run
+      @config.validate!
       PlatformValidator.new(@config).validate!
 
       entries = load_entries
@@ -113,67 +116,6 @@ module I18nContextGenerator
         parser = Parsers::Base.for(path)
         parser.parse(path)
       end
-    end
-
-    def load_entries
-      case normalized_discovery_mode
-      when 'source'
-        load_source_entries
-      when 'translations'
-        load_translations
-      else
-        auto_discovery_entries
-      end
-    end
-
-    def auto_discovery_entries
-      return load_source_entries if @config.translations.empty?
-
-      load_translations
-    end
-
-    def load_source_entries
-      translation_lookup = load_translation_lookup
-      discovered_entries = filter_source_entries(searcher.discover_localization_entries)
-
-      discovered_entries.map do |entry|
-        hydrated_entry = translation_lookup[entry.key]
-        translation_comment = hydrated_entry&.metadata&.dig(:comment)
-        source_comment = entry.comment
-        metadata = {}
-        metadata[:comment] = translation_comment || source_comment if translation_comment || source_comment
-        metadata[:source_location] = "#{entry.file}:#{entry.line}"
-
-        Parsers::TranslationEntry.new(
-          key: entry.key,
-          text: hydrated_entry&.text || entry.text || entry.key,
-          source_file: hydrated_entry&.source_file,
-          metadata: metadata
-        )
-      end
-    end
-
-    def load_translation_lookup
-      return @load_translation_lookup if defined?(@load_translation_lookup)
-
-      @load_translation_lookup = load_translations.each_with_object({}) do |entry, lookup|
-        lookup[entry.key] ||= entry
-      end
-    end
-
-    def normalized_discovery_mode
-      @config.discovery_mode.to_s.downcase
-    end
-
-    def translation_backed_discovery?
-      return true if normalized_discovery_mode == 'translations'
-      return false if normalized_discovery_mode == 'source'
-
-      @config.translations.any?
-    end
-
-    def entry_label_for_logging
-      translation_backed_discovery? ? 'translation keys' : 'source localization entries'
     end
 
     def filter_entries(entries)
@@ -253,32 +195,27 @@ module I18nContextGenerator
 
       # Use a thread pool for concurrent processing
       pool = Concurrent::FixedThreadPool.new(@config.concurrency)
-      semaphore = Concurrent::Semaphore.new(@config.concurrency)
       current_key = Concurrent::AtomicReference.new('')
 
       entries.each do |entry|
         pool.post do
-          semaphore.acquire
-          begin
-            current_key.set(truncate(entry.key, 40))
-            result = process_entry(entry)
-            @results << result
-            @errors << result if result.error
-          rescue StandardError => e
-            # Capture errors as results so they're visible in output
-            result = ExtractionResult.new(
-              key: entry.key,
-              text: entry.text,
-              description: 'Processing failed',
-              source_file: entry.source_file,
-              error: e.message
-            )
-            @results << result
-            @errors << result
-          ensure
-            semaphore.release
-            progress.advance(key: current_key.get)
-          end
+          current_key.set(truncate(entry.key, 40))
+          result = process_entry(entry)
+          @results << result
+          @errors << result if result.error
+        rescue StandardError => e
+          # Capture errors as results so they're visible in output
+          result = ExtractionResult.new(
+            key: entry.key,
+            text: entry.text,
+            description: 'Processing failed',
+            source_file: entry.source_file,
+            error: e.message
+          )
+          @results << result
+          @errors << result
+        ensure
+          progress.advance(key: current_key.get)
         end
       end
 
@@ -289,7 +226,12 @@ module I18nContextGenerator
 
     def process_entry(entry)
       # Search for key usage in code first — needed for both cache key and LLM prompt
-      matches = searcher.search(entry.key)
+      resource_type = entry.metadata&.dig(:resource_type)
+      matches = if resource_type
+                  searcher.search(entry.key, resource_type: resource_type)
+                else
+                  searcher.search(entry.key)
+                end
       comment = @config.include_translation_comments ? entry.metadata&.dig(:comment) : nil
 
       if matches.empty?
@@ -317,9 +259,8 @@ module I18nContextGenerator
       ].join("\n")
 
       # Check cache with match context included
-      if (cached = cache.get(entry.key, entry.text, context: cache_ctx))
-        return ExtractionResult.new(source_file: entry.source_file, **cached.transform_keys(&:to_sym))
-      end
+      cached = cache.get(entry.key, entry.text, context: cache_ctx)
+      return cached_extraction_result(entry, cached) if cached && !(cached[:error] || cached['error'])
 
       # Get context from LLM
       llm_result = llm.generate_context(
@@ -344,8 +285,12 @@ module I18nContextGenerator
         error: llm_result.error
       )
 
-      cache.set(entry.key, entry.text, result.to_h.except(:source_file), context: cache_ctx)
+      cache.set(entry.key, entry.text, result.to_h.except(:source_file), context: cache_ctx) unless result.error
       result
+    end
+
+    def cached_extraction_result(entry, cached)
+      ExtractionResult.new(source_file: entry.source_file, **cached.transform_keys(&:to_sym))
     end
 
     def write_output
