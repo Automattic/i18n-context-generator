@@ -692,5 +692,53 @@ RSpec.describe I18nContextGenerator::GitDiff do
         expect(locations.keys).to contain_exactly('changed.key')
       end
     end
+
+    it 'indexes removals against the merge base when the base branch has advanced' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          system('git', 'init', '-q', '-b', 'main')
+          path = 'Localizable.xcstrings'
+          catalog = lambda do |keys|
+            entries = keys.map { |key| %(    "#{key}" : {}) }.join(",\n")
+            <<~JSON
+              {
+                "sourceLanguage" : "en",
+                "strings" : {
+              #{entries}
+                },
+                "version" : "1.0"
+              }
+            JSON
+          end
+          commit = lambda do |message|
+            system('git', 'add', path)
+            system(
+              'git',
+              '-c', 'user.name=i18n-context-generator',
+              '-c', 'user.email=i18n-context-generator@example.com',
+              'commit', '-q', '-m', message
+            )
+          end
+
+          File.write(path, catalog.call(%w[alpha.key beta.key gamma.key]))
+          commit.call('Create catalog')
+          system('git', 'checkout', '-q', '-b', 'feature')
+          File.write(path, catalog.call(%w[beta.key gamma.key]))
+          commit.call('Remove alpha')
+          system('git', 'checkout', '-q', 'main')
+          File.write(path, catalog.call(%w[aaa.newkey alpha.key beta.key gamma.key]))
+          commit.call('Advance base catalog')
+          system('git', 'checkout', '-q', 'feature')
+
+          locations = described_class.new(
+            base_ref: 'main',
+            head_ref: 'HEAD'
+          ).changed_key_locations([path])
+
+          expect(locations.keys).to contain_exactly([path, 'alpha.key'])
+          expect(locations.keys).not_to include([path, 'aaa.newkey'])
+        end
+      end
+    end
   end
 end

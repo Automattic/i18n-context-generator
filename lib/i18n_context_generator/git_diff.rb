@@ -252,8 +252,12 @@ module I18nContextGenerator
       repository_root = root.strip
       relative_path = Pathname.new(File.expand_path(path))
                               .relative_path_from(Pathname.new(repository_root)).to_s
+      merge_base, _stderr, status = Open3.capture3(
+        'git', 'merge-base', @base_ref, @head_ref, chdir: repository_root
+      )
+      base_revision = status.success? && !merge_base.strip.empty? ? merge_base.strip : @base_ref
       [
-        file_at_revision(repository_root, relative_path, @base_ref),
+        file_at_revision(repository_root, relative_path, base_revision),
         file_at_revision(repository_root, relative_path, @head_ref)
       ]
     end
