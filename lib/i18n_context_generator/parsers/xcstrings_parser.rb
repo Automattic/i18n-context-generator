@@ -10,6 +10,7 @@ module I18nContextGenerator
         source_language = catalog['sourceLanguage']
 
         catalog.fetch('strings').filter_map do |key, entry|
+          next if key.empty?
           next if entry['shouldTranslate'] == false
 
           TranslationEntry.new(
@@ -34,8 +35,8 @@ module I18nContextGenerator
         raise TypeError, 'sourceLanguage must be a non-empty string' unless nonempty_string?(catalog['sourceLanguage'])
         raise TypeError, 'strings must be a mapping' unless catalog['strings'].is_a?(Hash)
 
-        valid_entries = catalog['strings'].all? { |key, entry| nonempty_string?(key) && entry.is_a?(Hash) }
-        raise TypeError, 'strings must map non-empty keys to entries' unless valid_entries
+        valid_entries = catalog['strings'].all? { |key, entry| key.is_a?(String) && entry.is_a?(Hash) }
+        raise TypeError, 'strings must map string keys to entries' unless valid_entries
 
         catalog
       rescue TypeError => e

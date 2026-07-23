@@ -50,6 +50,98 @@ RSpec.describe I18nContextGenerator::Writers::XcstringsWriter do
     end
   end
 
+  it 'preserves all untouched Xcode formatting and skips empty placeholder keys' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      original = <<~JSON
+        {
+          "sourceLanguage" : "en",
+          "strings" : {
+            "" : {},
+            "settings.title" : {
+              "comment" : "Old context",
+              "localizations" : {
+                "fr" : {
+                  "stringUnit" : {
+                    "state" : "translated",
+                    "value" : "Réglages"
+                  }
+                }
+              }
+            },
+            "other" : {
+              "comment" : "Keep me"
+            }
+          },
+          "version" : "1.0"
+        }
+      JSON
+      File.write(path, original)
+
+      described_class.new.write(
+        [build_result('settings.title', 'Title above the settings list')],
+        path
+      )
+
+      expected = original.sub(
+        '"comment" : "Old context"',
+        '"comment" : "Context: Title above the settings list"'
+      )
+      expect(File.read(path)).to eq(expected)
+    end
+  end
+
+  it 'does not rewrite the catalog when no result is writable' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      original = <<~JSON
+        {
+          "sourceLanguage" : "en",
+          "strings" : {
+            "settings.title" : {}
+          },
+          "version" : "1.0"
+        }
+      JSON
+      File.write(path, original)
+      result = build_result('settings.title', 'No usage found in source code')
+
+      expect(described_class.new.write([result], path)).to be(false)
+      expect(File.read(path)).to eq(original)
+    end
+  end
+
+  it 'adds a comment to an empty catalog entry without reformatting the catalog' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      original = <<~JSON
+        {
+          "sourceLanguage" : "en",
+          "strings" : {
+            "settings.title" : {},
+            "other" : {}
+          },
+          "version" : "1.0"
+        }
+      JSON
+      File.write(path, original)
+
+      described_class.new.write(
+        [build_result('settings.title', 'Settings title')],
+        path
+      )
+
+      expect(File.read(path)).to eq(
+        original.sub(
+          '"settings.title" : {}',
+          "\"settings.title\" : {\n      \"comment\" : \"Context: Settings title\"\n    }"
+        )
+      )
+      expect(Oj.load_file(path).dig('strings', 'settings.title', 'comment'))
+        .to eq('Context: Settings title')
+    end
+  end
+
   it 'appends generated context to a manual catalog comment' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'Localizable.xcstrings')

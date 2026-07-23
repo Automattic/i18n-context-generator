@@ -598,5 +598,99 @@ RSpec.describe I18nContextGenerator::GitDiff do
         expect(locations['profile.title']).to contain_exactly("#{path}:16")
       end
     end
+
+    it 'uses base lines for removals instead of attributing them to the following key' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.xcstrings')
+        base_content = <<~JSON
+          {
+            "sourceLanguage" : "en",
+            "strings" : {
+              "removed.key" : {
+                "comment" : "Remove this entry"
+              },
+              "remaining.key" : {
+                "comment" : "Keep this entry"
+              }
+            },
+            "version" : "1.0"
+          }
+        JSON
+        head_content = <<~JSON
+          {
+            "sourceLanguage" : "en",
+            "strings" : {
+              "remaining.key" : {
+                "comment" : "Keep this entry"
+              }
+            },
+            "version" : "1.0"
+          }
+        JSON
+        File.write(path, head_content)
+        diff_output = <<~DIFF
+          @@ -2,9 +2,6 @@
+             "sourceLanguage" : "en",
+             "strings" : {
+          -    "removed.key" : {
+          -      "comment" : "Remove this entry"
+          -    },
+               "remaining.key" : {
+                 "comment" : "Keep this entry"
+               }
+        DIFF
+
+        locations = described_class.new.send(
+          :extract_xcstrings_key_locations,
+          diff_output,
+          path,
+          base_content: base_content,
+          head_content: head_content
+        )
+
+        expect(locations.keys).to contain_exactly('removed.key')
+      end
+    end
+
+    it 'uses configured revision content instead of a divergent working tree' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.xcstrings')
+        revision_content = <<~JSON
+          {
+            "sourceLanguage" : "en",
+            "strings" : {
+              "changed.key" : {
+                "comment" : "New context"
+              }
+            },
+            "version" : "1.0"
+          }
+        JSON
+        working_content = revision_content.sub(
+          '"strings" : {',
+          %("strings" : {\n    "working.tree.only" : {},)
+        )
+        File.write(path, working_content)
+        diff_output = <<~DIFF
+          @@ -3,5 +3,5 @@
+             "strings" : {
+               "changed.key" : {
+          -      "comment" : "Old context"
+          +      "comment" : "New context"
+               }
+             },
+        DIFF
+
+        locations = described_class.new.send(
+          :extract_xcstrings_key_locations,
+          diff_output,
+          path,
+          base_content: revision_content.sub('New context', 'Old context'),
+          head_content: revision_content
+        )
+
+        expect(locations.keys).to contain_exactly('changed.key')
+      end
+    end
   end
 end

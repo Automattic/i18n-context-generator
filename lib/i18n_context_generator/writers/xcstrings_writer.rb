@@ -17,7 +17,9 @@ module I18nContextGenerator
       def write(results, source_path)
         return unless File.exist?(source_path)
 
-        catalog = Oj.load_file(source_path, mode: :strict)
+        original = File.binread(source_path)
+        document = XcstringsDocument.new(original, path: source_path)
+        catalog = document.catalog
         Parsers::XcstringsParser.validate_catalog!(catalog, path: source_path)
         results_by_key = results.each_with_object({}) do |result, lookup|
           next unless result_matches_source_path?(result, source_path)
@@ -25,12 +27,13 @@ module I18nContextGenerator
 
           lookup[result.key] = result
         end
+        return false if results_by_key.empty?
 
-        catalog.fetch('strings').each do |key, entry|
+        comments_by_key = catalog.fetch('strings').each_with_object({}) do |(key, entry), comments|
           result = results_by_key[key]
           next unless result
 
-          entry['comment'] = GeneratedComment.merge(
+          comments[key] = GeneratedComment.merge(
             existing: entry['comment'],
             generated: "#{@context_prefix}#{result.description}",
             prefix: @context_prefix,
@@ -38,12 +41,14 @@ module I18nContextGenerator
             separator: "\n"
           )
         end
+        rendered = document.with_comments(comments_by_key)
+        return false if rendered == original
 
-        rendered = "#{Oj.dump(catalog, indent: 2, mode: :compat)}\n"
         AtomicFile.replace(source_path, rendered) do |candidate_path|
           candidate = Oj.load_file(candidate_path, mode: :strict)
           Parsers::XcstringsParser.validate_catalog!(candidate, path: candidate_path)
         end
+        true
       rescue Oj::ParseError => e
         raise Error, "Failed to parse Apple string catalog #{source_path}: #{e.message}"
       end

@@ -5,6 +5,7 @@ require 'pathname'
 require_relative 'translation_comment_index'
 require_relative 'xml_scanner'
 require_relative 'android_resource'
+require_relative 'xcstrings_document'
 
 module I18nContextGenerator
   # Parses git diff to extract changed translation keys
@@ -37,7 +38,13 @@ module I18nContextGenerator
                         when '.strings'
                           extract_strings_key_locations(diff_output, normalized_path)
                         when '.xcstrings'
-                          extract_xcstrings_key_locations(diff_output, normalized_path)
+                          base_content, head_content = xcstrings_revision_contents(path)
+                          extract_xcstrings_key_locations(
+                            diff_output,
+                            normalized_path,
+                            base_content: base_content,
+                            head_content: head_content
+                          )
                         when '.xml'
                           extract_xml_key_locations(diff_output, normalized_path)
                         else
@@ -193,24 +200,33 @@ module I18nContextGenerator
       locations
     end
 
-    def extract_xcstrings_key_locations(diff_output, file_path)
-      index = xcstrings_line_index(file_path)
+    def extract_xcstrings_key_locations(diff_output, file_path, base_content: nil, head_content: nil)
+      current_content = File.binread(file_path)
+      head_index = xcstrings_line_index(head_content || current_content, file_path)
+      base_index = xcstrings_line_index(base_content || head_content || current_content, file_path)
       locations = Hash.new { |hash, key| hash[key] = [] }
+      old_line_number = nil
       new_line_number = nil
 
       diff_output.each_line do |line|
-        if (match = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
-          new_line_number = match[1].to_i
+        if (match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
+          old_line_number = match[1].to_i
+          new_line_number = match[2].to_i
           next
         end
-        next if new_line_number.nil?
+        next if old_line_number.nil? || new_line_number.nil?
         next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
 
-        if line.start_with?('+', '-')
-          key = index[new_line_number]
+        if line.start_with?('+')
+          key = head_index[new_line_number]
           locations[key] << "#{file_path}:#{new_line_number}" if key && !line[1..].strip.empty?
-          new_line_number += 1 if line.start_with?('+')
+          new_line_number += 1
+        elsif line.start_with?('-')
+          key = base_index[old_line_number]
+          locations[key] << "#{file_path}:#{old_line_number}" if key && !line[1..].strip.empty?
+          old_line_number += 1
         else
+          old_line_number += 1
           new_line_number += 1
         end
       end
@@ -218,30 +234,35 @@ module I18nContextGenerator
       locations.transform_values(&:uniq)
     end
 
-    def xcstrings_line_index(file_path)
-      catalog = Oj.load_file(file_path, mode: :strict)
-      keys = catalog.fetch('strings').keys
-      encoded_keys = keys.to_h { |key| [JSON.generate(key), key] }
-      lines = File.readlines(file_path, chomp: true)
-      candidates = lines.each_with_index.filter_map do |line, index|
-        match = line.match(/\A(?<indent>\s*)(?<key>"(?:\\.|[^"])*")\s*:\s*\{/)
-        key = encoded_keys[match&.[](:key)]
-        [index + 1, match[:indent].length, key] if key
-      end
-      return {} if candidates.empty?
+    def xcstrings_line_index(content, file_path)
+      return {} unless content
 
-      entry_indent = candidates.map { |(_line, indent, _key)| indent }.min
-      starts = candidates.select { |(_line, indent, _key)| indent == entry_indent }
-      catalog_end = lines.each_with_index.drop(starts.last.first).find do |line, _index|
-        indentation = line[/\A\s*/].length
-        line.strip.start_with?('}') && indentation < entry_indent
-      end&.last&.+(1) || (lines.length + 1)
-      starts.each_with_index.with_object({}) do |((start_line, _indent, key), index), line_index|
-        next_line = starts[index + 1]&.first || catalog_end
-        (start_line...next_line).each { |line_number| line_index[line_number] = key }
+      XcstringsDocument.new(content, path: file_path).line_index
+    end
+
+    def xcstrings_revision_contents(path)
+      directory = File.dirname(File.expand_path(path))
+      root, stderr, status = Open3.capture3('git', 'rev-parse', '--show-toplevel', chdir: directory)
+      unless status.success?
+        detail = stderr.strip
+        detail = 'unable to resolve repository root' if detail.empty?
+        raise Error, "Git diff failed for #{@base_ref}...#{@head_ref} (#{path}): #{detail}"
       end
-    rescue Oj::ParseError, KeyError, TypeError => e
-      raise Error, "Failed to index Apple string catalog #{file_path}: #{e.message}"
+
+      repository_root = root.strip
+      relative_path = Pathname.new(File.expand_path(path))
+                              .relative_path_from(Pathname.new(repository_root)).to_s
+      [
+        file_at_revision(repository_root, relative_path, @base_ref),
+        file_at_revision(repository_root, relative_path, @head_ref)
+      ]
+    end
+
+    def file_at_revision(repository_root, relative_path, revision)
+      stdout, _stderr, status = Open3.capture3(
+        'git', 'show', "#{revision}:#{relative_path}", chdir: repository_root
+      )
+      status.success? ? stdout : nil
     end
 
     # Extract keys from Android strings.xml diff.

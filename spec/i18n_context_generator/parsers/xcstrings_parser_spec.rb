@@ -76,6 +76,24 @@ RSpec.describe I18nContextGenerator::Parsers::XcstringsParser do
     end
   end
 
+  it 'accepts valid empty placeholder keys and skips them' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      File.write(path, <<~JSON)
+        {
+          "sourceLanguage" : "en",
+          "strings" : {
+            "" : {},
+            "visible" : {}
+          },
+          "version" : "1.0"
+        }
+      JSON
+
+      expect(parser.parse(path).map(&:key)).to eq(['visible'])
+    end
+  end
+
   it 'wraps malformed catalogs in an actionable error' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'Broken.xcstrings')
