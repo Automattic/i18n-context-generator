@@ -12,6 +12,7 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
     let(:client) { described_class.new }
     let(:response_body) do
       {
+        status: 'completed',
         output: [
           {
             type: 'message',
@@ -70,6 +71,45 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
       client.generate_context(key: 'ok', text: 'OK', matches: [])
 
       expect(client).to have_received(:post_json)
+    end
+
+    it 'returns explicit errors for incomplete responses and refusals' do
+      response_bodies = [
+        { status: 'incomplete', incomplete_details: { reason: 'max_output_tokens' }, output: [] },
+        {
+          status: 'completed',
+          output: [
+            { type: 'message', content: [{ type: 'refusal', refusal: 'Cannot process this input.' }] }
+          ]
+        }
+      ]
+      allow(client).to receive(:post_json) do
+        body = response_bodies.shift
+        instance_double(Net::HTTPOK, code: '200', body: body.to_json)
+      end
+
+      incomplete = client.generate_context(key: 'one', text: 'One', matches: [])
+      refusal = client.generate_context(key: 'two', text: 'Two', matches: [])
+
+      expect(incomplete).to have_attributes(description: 'Incomplete response', error: /max_output_tokens/)
+      expect(refusal).to have_attributes(description: 'Provider refused request', error: /Cannot process/)
+    end
+
+    it 'reports local prompt preparation failures without making an API request' do
+      allow(client).to receive(:post_json)
+
+      result = client.generate_context(
+        key: 'common.save',
+        text: 'Save',
+        matches: [],
+        max_prompt_chars: 1_999
+      )
+
+      expect(result).to have_attributes(
+        description: 'Prompt preparation failed',
+        error: /max_prompt_chars must be an integer/
+      )
+      expect(client).not_to have_received(:post_json)
     end
   end
 end

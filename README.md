@@ -12,7 +12,7 @@ It is designed for mobile codebases. Each run must target either iOS or Android,
 - Searches Swift, Objective-C, Kotlin, Java, and Android XML for matching usages
 - Uses Anthropic or OpenAI models to infer UI context
 - Supports diff-based runs, key filters, and key ranges for incremental work
-- Redacts likely secrets, URLs, and emails from prompts by default
+- Applies best-effort redaction of likely secrets, URLs, and emails by default
 - Optionally caches results to avoid repeating identical LLM work
 
 ## Installation
@@ -109,6 +109,11 @@ processing:
   concurrency: 5
   context_lines: 15
   max_matches_per_key: 3
+  max_prompt_chars: 50000
+
+cache:
+  enabled: false
+  directory: .i18n-context-generator-cache
 
 output:
   format: csv
@@ -127,6 +132,7 @@ swift:
 privacy:
   include_file_paths: false
   include_translation_comments: true
+  # Best-effort only; source snippets are still sent to the remote provider.
   redact_prompts: true
 ```
 
@@ -148,6 +154,7 @@ Client `source.ignore` entries extend the built-in ignore list; they do not repl
 - `-p`, `--provider anthropic|openai`: LLM provider, default `anthropic`
 - `-m`, `--model MODEL`: explicit model override
 - `--concurrency N`: parallel request count, default `5`
+- `--max-prompt-chars N`: hard character limit per LLM prompt, default `50000`
 
 ### Filtering and Incremental Runs
 
@@ -165,11 +172,24 @@ Client `source.ignore` entries extend the built-in ignore list; they do not repl
 - `--context-prefix TEXT`: prefix generated comments, default `Context: `
 - `--context-mode replace|append`: replace existing comments or append to them
 - `--cache`: enable on-disk caching
+- `--cache-dir PATH`: cache directory, default `.i18n-context-generator-cache`
 - `--include-file-paths`: include full source paths in prompts
 - `--include-translation-comments`: include existing translation comments in prompts, default `true`
-- `--redact-prompts`: redact likely secrets and PII before prompts are sent, default `true`
+- `--redact-prompts`: best-effort redact likely secrets and PII before prompts are sent, default `true`
 
 Run `bundle exec exe/i18n-context-generator help extract` for the full command reference.
+
+### Prompt privacy and size
+
+Remote-provider runs send translation text and selected source snippets off the machine. By default, full paths are reduced to basenames and the tool applies pattern-based redaction to keys, text, comments, paths, scopes, matched lines, and surrounding context. This is a best-effort safeguard, not a guarantee that all private or identifying data will be detected. Review the source paths and translation comments you configure before using a remote provider.
+
+`processing.max_prompt_chars` bounds each user prompt. When evidence exceeds the limit, surrounding code and optional metadata are truncated deterministically, with the translation key, text, and at least one usage receiving priority. Provider output is validated against the application contract before it can reach an output writer.
+
+### Cache behavior
+
+Caching is opt-in and stores successful results only; provider, resolved model, prompt controls, source context, and source-discovery locations are part of each cache identity. Writes use private temporary files and atomic replacement so concurrent workers cannot leave partial JSON behind.
+
+The default directory is `.i18n-context-generator-cache`. Add that directory—or your custom `cache.directory`—to the client repository's `.gitignore`; cached LLM output should not be committed. The generated starter configuration keeps caching disabled by default.
 
 ## Supported Inputs
 

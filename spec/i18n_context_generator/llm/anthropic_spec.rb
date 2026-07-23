@@ -12,6 +12,7 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
     let(:client) { described_class.new }
     let(:response_body) do
       {
+        stop_reason: 'end_turn',
         content: [
           {
             type: 'text',
@@ -37,6 +38,8 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
         )
         expect(body[:model]).to eq('claude-sonnet-4-6')
         expect(body[:system]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
+        expect(body.dig(:output_config, :format, :type)).to eq('json_schema')
+        expect(body.dig(:output_config, :format, :schema, :required)).to include('description')
         response
       end
 
@@ -53,6 +56,40 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
       expect(result.tone).to eq('neutral')
       expect(result.max_length).to eq(12)
       expect(result.error).to be_nil
+    end
+
+    it 'rejects refusals and token-truncated successful HTTP responses' do
+      response_bodies = [
+        { stop_reason: 'refusal', content: [{ type: 'text', text: 'I cannot help.' }] },
+        { stop_reason: 'max_tokens', content: [{ type: 'text', text: '{"description":' }] }
+      ]
+      allow(client).to receive(:post_json) do
+        body = response_bodies.shift
+        instance_double(Net::HTTPOK, code: '200', body: body.to_json)
+      end
+
+      refusal = client.generate_context(key: 'one', text: 'One', matches: [])
+      incomplete = client.generate_context(key: 'two', text: 'Two', matches: [])
+
+      expect(refusal).to have_attributes(description: 'Provider refused request', error: /refused/)
+      expect(incomplete).to have_attributes(description: 'Incomplete response', error: /max_tokens/)
+    end
+
+    it 'reports local prompt preparation failures without making an API request' do
+      allow(client).to receive(:post_json)
+
+      result = client.generate_context(
+        key: 'common.save',
+        text: 'Save',
+        matches: [],
+        max_prompt_chars: 1_999
+      )
+
+      expect(result).to have_attributes(
+        description: 'Prompt preparation failed',
+        error: /max_prompt_chars must be an integer/
+      )
+      expect(client).not_to have_received(:post_json)
     end
   end
 end

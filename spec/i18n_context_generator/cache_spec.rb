@@ -44,6 +44,35 @@ RSpec.describe I18nContextGenerator::Cache do
       expect(cache.get('key', 'text')).to be_nil
       expect(Dir.glob(File.join(cache_dir, '*.json'))).to be_empty
     end
+
+    it 'writes duplicate keys atomically when workers race' do
+      Dir.mktmpdir do |dir|
+        cache = described_class.new(enabled: true, directory: dir)
+        workers = 12.times.map do |index|
+          Thread.new do
+            cache.set('same.key', 'Same text', { description: "Context #{index}" })
+          end
+        end
+        workers.each(&:join)
+
+        cached = cache.get('same.key', 'Same text')
+        expect(cached[:description]).to match(/\AContext \d+\z/)
+        expect(Dir.glob(File.join(dir, '*.json')).size).to eq(1)
+        expect(Dir.glob(File.join(dir, '*.tmp'))).to be_empty
+      end
+    end
+
+    it 'uses a configurable cache directory' do
+      Dir.mktmpdir do |dir|
+        custom_dir = File.join(dir, 'private-cache')
+        cache = described_class.new(enabled: true, directory: custom_dir)
+
+        cache.set('key', 'text', { description: 'Cached context' })
+
+        expect(cache.directory).to eq(custom_dir)
+        expect(Dir.glob(File.join(custom_dir, '*.json')).size).to eq(1)
+      end
+    end
   end
 
   describe 'context-based invalidation' do
@@ -116,6 +145,30 @@ RSpec.describe I18nContextGenerator::Cache do
       FileUtils.rm_rf(cache_dir)
 
       expect { cache.clear }.not_to raise_error
+    end
+
+    it 'removes legacy MD5 cache entries when clearing after an upgrade' do
+      cache = described_class.new(enabled: true)
+      cache.set('key', 'text', { description: 'current data' })
+      File.write(File.join(cache_dir, "#{'a' * 32}.json"), '{"description":"legacy data"}')
+
+      cache.clear
+
+      expect(File.directory?(cache_dir)).to be false
+    end
+
+    it 'preserves unrelated files in a custom cache directory' do
+      Dir.mktmpdir do |dir|
+        unrelated_path = File.join(dir, 'keep.txt')
+        File.write(unrelated_path, 'client data')
+        cache = described_class.new(enabled: true, directory: dir)
+        cache.set('key', 'text', { description: 'data' })
+
+        cache.clear
+
+        expect(File.read(unrelated_path)).to eq('client data')
+        expect(Dir.glob(File.join(dir, '*.json'))).to be_empty
+      end
     end
   end
 

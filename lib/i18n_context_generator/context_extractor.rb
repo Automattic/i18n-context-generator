@@ -4,6 +4,7 @@ require_relative 'context_extractor/source_filters'
 require_relative 'context_extractor/run_logging'
 require_relative 'context_extractor/source_entries'
 require_relative 'context_extractor/translation_filters'
+require_relative 'context_extractor/cache_identity'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -14,6 +15,7 @@ module I18nContextGenerator
     include RunLogging
     include SourceEntries
     include TranslationFilters
+    include CacheIdentity
 
     # Result for a single translation key
     ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
@@ -126,7 +128,7 @@ module I18nContextGenerator
     end
 
     def cache
-      @cache ||= Cache.new(enabled: !@config.no_cache)
+      @cache ||= Cache.new(enabled: !@config.no_cache, directory: @config.cache_dir)
     end
 
     def load_translations
@@ -259,16 +261,7 @@ module I18nContextGenerator
       # Limit matches to avoid huge prompts
       matches = matches.first(@config.max_matches_per_key)
 
-      # Build a cache context digest from all prompt-shaping inputs so the cache
-      # invalidates when source code, comments, or model change
-      cache_ctx = [
-        matches.map { |m| "#{m.file}:#{m.line}:#{m.match_line}:#{m.enclosing_scope}:#{m.context}" }.sort.join("\0"),
-        "comment:#{comment}",
-        "provider:#{@config.provider}",
-        "model:#{@config.model}",
-        "include_file_paths:#{@config.include_file_paths}",
-        "redact_prompts:#{@config.redact_prompts}"
-      ].join("\n")
+      cache_ctx = cache_context(entry, matches, comment)
 
       # Check cache with match context included
       cached = cache.get(entry.key, entry.text, context: cache_ctx)
@@ -282,7 +275,8 @@ module I18nContextGenerator
         model: @config.model,
         comment: comment,
         include_file_paths: @config.include_file_paths,
-        redact_prompts: @config.redact_prompts
+        redact_prompts: @config.redact_prompts,
+        max_prompt_chars: @config.max_prompt_chars
       )
 
       result_locations = result_locations_for(entry, matches)

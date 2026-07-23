@@ -929,16 +929,23 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         model: 'gpt-5-mini',
         comment: 'Shown in the settings navigation bar',
         include_file_paths: false,
-        redact_prompts: true
+        redact_prompts: true,
+        max_prompt_chars: 50_000
       )
       expect(cache_write[:key]).to eq('settings.title')
       expect(cache_write[:text]).to eq('Settings')
       expect(cache_write[:result][:description]).to eq('Navigation title for the settings screen')
-      expect(cache_write[:context]).to include('comment:Shown in the settings navigation bar')
-      expect(cache_write[:context]).to include('provider:anthropic')
-      expect(cache_write[:context]).to include('model:gpt-5-mini')
-      expect(cache_write[:context]).to include('include_file_paths:false')
-      expect(cache_write[:context]).to include('redact_prompts:true')
+      cache_identity = JSON.parse(cache_write[:context])
+      expect(cache_identity).to include(
+        'comment' => 'Shown in the settings navigation bar',
+        'provider' => 'anthropic',
+        'resolved_model' => 'gpt-5-mini'
+      )
+      expect(cache_identity['prompt']).to eq(
+        'include_file_paths' => false,
+        'redact_prompts' => true,
+        'max_prompt_chars' => 50_000
+      )
       expect(result.description).to eq('Navigation title for the settings screen')
       expect(result.locations).to eq(
         ['/tmp/SettingsViewController.swift:10', '/tmp/SettingsHeaderView.swift:18']
@@ -997,6 +1004,38 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:process_entry, source_entry)
 
       expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
+    end
+
+    it 'includes source discovery locations and the resolved default model in cache identity' do
+      config = I18nContextGenerator::Config.new(translations: [], provider: 'openai')
+      extractor = described_class.new(config)
+      source_entry = build_entry(
+        'settings.title',
+        'Settings',
+        metadata: {
+          source_location: '/tmp/SettingsView.swift:14',
+          source_locations: ['/tmp/SettingsView.swift:14']
+        }
+      )
+      searcher = instance_double(I18nContextGenerator::Searcher, search: [match_one])
+      cache_context = nil
+      cache = instance_double(I18nContextGenerator::Cache, set: nil)
+      allow(cache).to receive(:get) do |_key, _text, context:|
+        cache_context = context
+        nil
+      end
+      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+      allow(llm).to receive(:generate_context).and_return(
+        I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
+      )
+      allow(extractor).to receive_messages(searcher: searcher, cache: cache, llm: llm)
+
+      extractor.send(:process_entry, source_entry)
+      identity = JSON.parse(cache_context)
+
+      expect(identity['resolved_model']).to eq(I18nContextGenerator::LLM::OpenAI::DEFAULT_MODEL)
+      expect(identity.dig('source_discovery', 'source_location')).to eq('/tmp/SettingsView.swift:14')
+      expect(identity.dig('source_discovery', 'source_locations')).to eq(['/tmp/SettingsView.swift:14'])
     end
 
     it 'separates changed discovery locations from all evidence locations' do

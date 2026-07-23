@@ -12,9 +12,11 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.concurrency).to eq(5)
       expect(config.context_lines).to eq(15)
       expect(config.max_matches_per_key).to eq(3)
+      expect(config.max_prompt_chars).to eq(50_000)
       expect(config.output_path).to be_nil
       expect(config.output_format).to eq('csv')
       expect(config.no_cache).to be true
+      expect(config.cache_dir).to eq('.i18n-context-generator-cache')
       expect(config.dry_run).to be false
       expect(config.write_back).to be false
       expect(config.context_prefix).to eq('Context: ')
@@ -153,6 +155,11 @@ RSpec.describe I18nContextGenerator::Config do
           concurrency: 8
           context_lines: 15
           max_matches_per_key: 5
+          max_prompt_chars: 24000
+
+        cache:
+          enabled: true
+          directory: tmp/i18n-cache
 
         output:
           path: context.csv
@@ -194,6 +201,9 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.concurrency).to eq(8)
       expect(config.context_lines).to eq(15)
       expect(config.max_matches_per_key).to eq(5)
+      expect(config.max_prompt_chars).to eq(24_000)
+      expect(config.no_cache).to be false
+      expect(config.cache_dir).to eq('tmp/i18n-cache')
       expect(config.output_path).to eq('context.csv')
       expect(config.write_back).to be true
       expect(config.context_prefix).to eq('')
@@ -246,6 +256,13 @@ RSpec.describe I18nContextGenerator::Config do
         .to raise_error(I18nContextGenerator::Error, /source must be a mapping/)
     end
 
+    it 'rejects non-boolean cache enablement' do
+      File.write(config_path, "cache:\n  enabled: sometimes\n")
+
+      expect { described_class.from_file(config_path) }
+        .to raise_error(I18nContextGenerator::Error, /cache.enabled must be true or false/)
+    end
+
     it 'wraps unsupported YAML aliases in a configuration error' do
       File.write(config_path, "defaults: &defaults\n  concurrency: 5\nprocessing: *defaults\n")
 
@@ -277,9 +294,11 @@ RSpec.describe I18nContextGenerator::Config do
         model: 'claude-3-opus',
         discovery_mode: 'source',
         concurrency: 3,
+        max_prompt_chars: 18_000,
         output: 'output.csv',
         format: 'json',
         cache: true,
+        cache_dir: 'tmp/context-cache',
         dry_run: true,
         keys: 'key1,key2',
         write_back: true,
@@ -300,9 +319,11 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.model).to eq('claude-3-opus')
       expect(config.discovery_mode).to eq('source')
       expect(config.concurrency).to eq(3)
+      expect(config.max_prompt_chars).to eq(18_000)
       expect(config.output_path).to eq('output.csv')
       expect(config.output_format).to eq('json')
       expect(config.no_cache).to be false
+      expect(config.cache_dir).to eq('tmp/context-cache')
       expect(config.dry_run).to be true
       expect(config.key_filter).to eq('key1,key2')
       expect(config.write_back).to be true
@@ -427,10 +448,15 @@ RSpec.describe I18nContextGenerator::Config do
     end
 
     it 'rejects unsafe numeric values' do
-      config = described_class.new(concurrency: 0, context_lines: -1, max_matches_per_key: 1.5)
+      config = described_class.new(
+        concurrency: 0,
+        context_lines: -1,
+        max_matches_per_key: 1.5,
+        max_prompt_chars: 1_999
+      )
 
       expect { config.validate! }
-        .to raise_error(I18nContextGenerator::Error, /concurrency.*context_lines.*max_matches_per_key/)
+        .to raise_error(I18nContextGenerator::Error, /concurrency.*context_lines.*max_matches_per_key.*max_prompt_chars/)
     end
 
     it 'rejects unknown domain values loaded outside Thor' do
@@ -497,6 +523,16 @@ RSpec.describe I18nContextGenerator::Config do
 
         expect { described_class.new(output_path: output_directory).validate! }
           .to raise_error(I18nContextGenerator::Error, /output path is a directory/)
+      end
+    end
+
+    it 'rejects a file used as an enabled cache directory' do
+      Dir.mktmpdir do |dir|
+        cache_path = File.join(dir, 'cache-file')
+        File.write(cache_path, 'not a directory')
+
+        expect { described_class.new(no_cache: false, cache_dir: cache_path).validate! }
+          .to raise_error(I18nContextGenerator::Error, /cache directory path is not a directory/)
       end
     end
 
