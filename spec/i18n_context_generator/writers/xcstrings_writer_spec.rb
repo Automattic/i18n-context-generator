@@ -161,6 +161,34 @@ RSpec.describe I18nContextGenerator::Writers::XcstringsWriter do
     end
   end
 
+  it 'infers block indentation from a non-inline sibling in mixed layouts' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      File.write(path, <<~JSON)
+        {
+          "sourceLanguage" : "en",
+          "strings" : { "a.key" : {},
+            "b.key" : { "extractionState" : "manual" }
+          },
+          "version" : "1.0"
+        }
+      JSON
+
+      described_class.new.write(
+        [
+          build_result('a.key', 'First context'),
+          build_result('b.key', 'Second context')
+        ],
+        path
+      )
+      catalog = Oj.load_file(path)
+
+      expect(catalog.dig('strings', 'a.key', 'comment')).to eq('Context: First context')
+      expect(catalog.dig('strings', 'b.key', 'comment')).to eq('Context: Second context')
+      expect(catalog.dig('strings', 'b.key', 'extractionState')).to eq('manual')
+    end
+  end
+
   it 'appends generated context to a manual catalog comment' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'Localizable.xcstrings')

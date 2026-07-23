@@ -97,9 +97,10 @@ module I18nContextGenerator
     def indent_unit
       @indent_unit ||= begin
         strings_indent = line_indent(@strings_member.key_start)
-        entry_indent = line_indent(@entry_members.first&.key_start || @strings_member.key_start)
+        block_entry = @entry_members.find { |member| !inline_member?(member) }
+        entry_indent = line_indent(block_entry&.key_start || @strings_member.key_start)
         difference = entry_indent.delete_prefix(strings_indent)
-        difference.empty? ? '  ' : difference
+        difference.empty? || !difference.match?(/\A[ \t]*\z/) ? '  ' : difference
       end
     end
 

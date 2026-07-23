@@ -26,8 +26,8 @@ _None_
   including removals on diverged base branches.
 - Reject unknown options in explicitly versioned configurations and unknown
   translation-entry keys instead of silently ignoring client typos.
-- Preserve Apple string-catalog formatting and accept empty placeholder and
-  compact inline entries.
+- Preserve Apple string-catalog formatting and accept empty placeholder,
+  compact, and mixed-layout entries.
 - Keep preview patches machine-applicable by isolating diagnostics and preserving
   hunk contents.
 - Preserve failed-request telemetry, custom-endpoint cache identity, literal
