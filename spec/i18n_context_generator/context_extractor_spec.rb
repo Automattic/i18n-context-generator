@@ -578,6 +578,30 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(extractor.results).to be_empty
     end
 
+    it 'rejects globally oversized supplemental context before starting workers' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source',
+        supplemental_context: { 'Glossary' => 'full glossary content ' * 150 },
+        max_prompt_chars: 2_000
+      )
+      extractor = described_class.new(config, quiet: true, progress: false)
+      entries = [
+        build_entry('settings.title', 'Settings'),
+        build_entry('settings.save', 'Save')
+      ]
+      client = I18nContextGenerator::LLM::Client.new
+      allow(extractor).to receive(:load_entries).and_return(entries)
+      allow(extractor).to receive(:process_entries)
+      allow(I18nContextGenerator::LLM::Client).to receive(:for).and_return(client)
+
+      expect { extractor.run }
+        .to raise_error(I18nContextGenerator::Error, /complete supplemental context/)
+      expect(extractor).not_to have_received(:process_entries)
+      expect(extractor.results).to be_empty
+    end
+
     it 'passes the once-resolved platform into source discovery' do
       Dir.mktmpdir do |source_dir|
         config = I18nContextGenerator::Config.new(

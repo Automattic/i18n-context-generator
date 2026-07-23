@@ -53,7 +53,7 @@ module I18nContextGenerator
 
       def load_file(path)
         bytes = File.binread(path)
-        raise Error, "context file is not text: #{path}" if bytes.include?("\0")
+        raise Error, "context file contains NUL bytes; convert it to UTF-8 text: #{path}" if bytes.include?("\0")
 
         content = scrub_text(bytes)
         raise Error, "context file is empty: #{path}" if content.strip.empty?

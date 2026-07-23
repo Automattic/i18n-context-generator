@@ -63,8 +63,15 @@ module I18nContextGenerator
       # Resolve shared prompt inputs and provider state on the caller thread so
       # file reads, digest work, and configuration errors are not duplicated by workers.
       context_sources = supplemental_context
-      cache_context_sources(context_sources)
-      llm
+      cache_context_sources
+      llm_client = llm
+      unless context_sources.empty?
+        llm_client.validate_supplemental_context!(
+          supplemental_context: context_sources,
+          redact_prompts: @config.redact_prompts,
+          max_prompt_chars: @config.max_prompt_chars
+        )
+      end
       process_entries(entries)
       @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
 
@@ -238,7 +245,7 @@ module I18nContextGenerator
       matches = matches.first(@config.max_matches_per_key)
       context_sources = supplemental_context
 
-      cache_ctx = cache_context(entry, matches, comment, context_sources)
+      cache_ctx = cache_context(entry, matches, comment)
 
       # Check cache with match context included
       cached = cache.get(entry.key, entry.text, context: cache_ctx)

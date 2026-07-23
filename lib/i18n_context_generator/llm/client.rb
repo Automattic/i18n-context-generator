@@ -13,7 +13,7 @@ require_relative '../file_classifier'
 module I18nContextGenerator
   module LLM
     # Raised when local evidence cannot be prepared within prompt constraints.
-    class PromptPreparationError < StandardError; end
+    class PromptPreparationError < I18nContextGenerator::Error; end
 
     # Result from LLM context generation
     ContextResult = Data.define(
@@ -98,6 +98,21 @@ module I18nContextGenerator
 
       def resolved_model(model)
         model || self.class::DEFAULT_MODEL
+      end
+
+      # Reject only context that cannot fit even the smallest usable per-key prompt.
+      def validate_supplemental_context!(supplemental_context:, redact_prompts: true, max_prompt_chars: nil)
+        context_sources = prompt_context_sources(supplemental_context, redact_prompts: redact_prompts)
+        return if context_sources.empty?
+
+        evidence = {
+          platform: 'mobile',
+          translation: { key: 'k', text: 't' },
+          usages: [{ location: 'x', line: 1, matched_line: 'x', context: 'x' }],
+          supplemental_context: context_sources
+        }
+        fit_prompt(evidence, max_prompt_chars || DEFAULT_MAX_PROMPT_CHARS)
+        nil
       end
 
       protected

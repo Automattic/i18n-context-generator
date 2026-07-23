@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+module I18nContextGenerator
+  class Error < StandardError; end
+end
+
 require 'yaml'
 require 'csv'
 require 'digest'
@@ -46,7 +50,3 @@ require_relative 'i18n_context_generator/git_diff'
 require_relative 'i18n_context_generator/platform_validator'
 require_relative 'i18n_context_generator/run_metrics'
 require_relative 'i18n_context_generator/context_extractor'
-
-module I18nContextGenerator
-  class Error < StandardError; end
-end

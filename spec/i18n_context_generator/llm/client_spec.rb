@@ -230,6 +230,24 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     )
   end
 
+  it 'preflights context that cannot fit even a minimal application prompt' do
+    source = I18nContextGenerator::ContextSource.new(
+      kind: :file,
+      name: 'GLOSSARY.md',
+      content: "BEGIN\n#{'full glossary content ' * 150}\nEND"
+    )
+
+    expect do
+      client.validate_supplemental_context!(
+        supplemental_context: [source],
+        max_prompt_chars: 2_000
+      )
+    end.to raise_error(
+      I18nContextGenerator::LLM::PromptPreparationError,
+      /complete supplemental context.*max_prompt_chars=2000.*reduce context files or runtime context/
+    )
+  end
+
   describe '.for' do
     it 'builds an Anthropic client' do
       anthropic_client = instance_double(I18nContextGenerator::LLM::Anthropic)

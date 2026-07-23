@@ -65,7 +65,10 @@ RSpec.describe I18nContextGenerator::SupplementalContext do
         expect { described_class.load(files: [empty], runtime: {}) }
           .to raise_error(I18nContextGenerator::Error, /context file is empty: #{Regexp.escape(empty)}/)
         expect { described_class.load(files: [binary], runtime: {}) }
-          .to raise_error(I18nContextGenerator::Error, /context file is not text: #{Regexp.escape(binary)}/)
+          .to raise_error(
+            I18nContextGenerator::Error,
+            /context file contains NUL bytes; convert it to UTF-8 text: #{Regexp.escape(binary)}/
+          )
       end
     end
 

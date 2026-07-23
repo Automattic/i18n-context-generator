@@ -8,11 +8,11 @@ module I18nContextGenerator
     module CacheIdentity
       private
 
-      def cache_context(entry, matches, comment, context_sources)
+      def cache_context(entry, matches, comment)
         JSON.generate(
           matches: sorted_cache_matches(matches),
           comment: comment,
-          supplemental_context: cache_context_sources(context_sources),
+          supplemental_context: cache_context_sources,
           provider: @config.provider,
           resolved_model: resolved_model,
           endpoint: @config.endpoint,
@@ -21,8 +21,8 @@ module I18nContextGenerator
         )
       end
 
-      def cache_context_sources(sources)
-        @cache_context_sources ||= sources.map do |source|
+      def cache_context_sources
+        @cache_context_sources ||= supplemental_context.map do |source|
           {
             kind: source.kind,
             name: source.name,
