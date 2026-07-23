@@ -27,11 +27,11 @@ module I18nContextGenerator
           # Only write comments on <string> elements, not <plurals> or <string-array>.
           # Plural/array parent comments would use a single child's description which
           # is misleading for the resource as a whole.
-          # Match the opening <string name="..."> tag — works for both single-line and
-          # multi-line string elements.
-          if (match = line.match(/^(\s*)<string\s+name="([^"]+)"/))
-            indent = match[1]
-            key = match[2]
+          # Match the complete opening tag so attribute order, quote style, and
+          # multiline attributes do not affect write-back.
+          if (element = string_element_at(lines, i))
+            indent = element[:indent]
+            key = element[:key]
             result = results_by_key[key]
 
             insert_context_comment(output_lines, indent, result.description) if writable_result?(result)
@@ -47,6 +47,23 @@ module I18nContextGenerator
       end
 
       private
+
+      def string_element_at(lines, index)
+        start_match = lines[index].match(/^(\s*)<string(?=\s|>)/)
+        return unless start_match
+
+        opening_tag_lines = []
+        lines[index..].each do |line|
+          opening_tag_lines << line
+          break if line.include?('>')
+        end
+        opening_tag = opening_tag_lines.join
+        opening_tag = opening_tag.split('>', 2).first
+        name_match = opening_tag.match(/\bname\s*=\s*(["'])(.*?)\1/m)
+        return unless name_match
+
+        { indent: start_match[1], key: name_match[2] }
+      end
 
       # Build a lookup that maps base resource names to results.
       # For plural keys like "post_likes_count:one", maps "post_likes_count" to a result.

@@ -40,6 +40,7 @@ module I18nContextGenerator
         metadata = hydrated_entry&.metadata&.dup || {}
         metadata[:comment] = translation_comment || source_comment if translation_comment || source_comment
         metadata[:source_location] = "#{entry.file}:#{entry.line}"
+        metadata[:source_locations] = entry.locations
         metadata[:resource_type] = entry.resource_type unless entry.resource_type == :string
 
         Parsers::TranslationEntry.new(
@@ -53,8 +54,9 @@ module I18nContextGenerator
       def load_translation_lookup
         return @load_translation_lookup if defined?(@load_translation_lookup)
 
-        @load_translation_lookup = load_translations.each_with_object({}) do |entry, lookup|
-          lookup[entry.key] ||= entry
+        empty_lookup = Hash.new { |hash, key| hash[key] = [] }
+        @load_translation_lookup = load_translations.each_with_object(empty_lookup) do |entry, lookup|
+          lookup[entry.key] << entry
         end
       end
 
@@ -77,8 +79,7 @@ module I18nContextGenerator
         when :plural, :array
           load_translation_resource_lookup[[entry.resource_type, entry.key]]
         else
-          translation_entry = load_translation_lookup[entry.key]
-          translation_entry ? [translation_entry] : []
+          load_translation_lookup[entry.key]
         end
       end
 

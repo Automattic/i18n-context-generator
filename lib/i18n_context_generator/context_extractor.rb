@@ -51,7 +51,7 @@ module I18nContextGenerator
 
     def run
       @config.validate!
-      PlatformValidator.new(@config).validate!
+      @platform = PlatformValidator.new(@config).validate!
 
       entries = load_entries
       entries = filter_entries(entries) if @config.key_filter
@@ -92,7 +92,8 @@ module I18nContextGenerator
       @searcher ||= Searcher.new(
         source_paths: @config.source_paths,
         ignore_patterns: @config.ignore_patterns,
-        context_lines: @config.context_lines
+        context_lines: @config.context_lines,
+        platform: @platform
       )
     end
 
@@ -107,15 +108,16 @@ module I18nContextGenerator
     def load_translations
       return @load_translations if defined?(@load_translations)
 
-      @load_translations = @config.translations.uniq.flat_map do |path|
-        unless File.exist?(path)
-          warn "Translation file not found: #{path}"
-          next []
-        end
-
-        parser = Parsers::Base.for(path)
+      entries = @config.translations.flat_map do |path|
+        parser = Parsers::Base.for(path, locale: @config.translation_locales[path])
         parser.parse(path)
       end
+
+      @load_translations = validate_translation_entries(entries)
+    rescue I18nContextGenerator::Error
+      raise
+    rescue StandardError => e
+      raise Error, "Failed to load translations: #{e.message}"
     end
 
     def filter_entries(entries)
@@ -158,21 +160,19 @@ module I18nContextGenerator
 
       if @config.start_key
         found_idx = entries.find_index { |e| e.key == @config.start_key }
-        if found_idx
-          start_idx = found_idx
-        else
-          puts "Warning: start_key '#{@config.start_key}' not found, starting from beginning"
-        end
+        raise Error, "start_key not found: #{@config.start_key}" unless found_idx
+
+        start_idx = found_idx
       end
 
       if @config.end_key
-        found_idx = entries.find_index { |e| e.key == @config.end_key }
-        if found_idx
-          end_idx = found_idx
-        else
-          puts "Warning: end_key '#{@config.end_key}' not found, processing to end"
-        end
+        found_idx = entries.rindex { |e| e.key == @config.end_key }
+        raise Error, "end_key not found: #{@config.end_key}" unless found_idx
+
+        end_idx = found_idx
       end
+
+      raise Error, 'start_key must not come after end_key' if start_idx > end_idx
 
       range_info = []
       range_info << "from '#{@config.start_key}'" if @config.start_key
@@ -329,18 +329,38 @@ module I18nContextGenerator
       updated_count = 0
       results_by_key = build_results_by_key_for_code_write_back
 
-      @config.source_paths.each do |source_path|
-        swift_files = find_swift_files(source_path, ignore_patterns: @config.ignore_patterns)
+      swift_files = @config.source_paths.flat_map do |source_path|
+        find_swift_files(source_path, ignore_patterns: @config.ignore_patterns)
+      end.uniq
 
-        swift_files.each do |swift_file|
-          if swift_writer.update_file(swift_file, results_by_key)
-            updated_count += 1
-            puts "Updated #{swift_file} with context comments"
-          end
+      swift_files.each do |swift_file|
+        if swift_writer.update_file(swift_file, results_by_key)
+          updated_count += 1
+          puts "Updated #{swift_file} with context comments"
         end
       end
 
       puts "Updated #{updated_count} Swift files with context comments" if updated_count.positive?
+    end
+
+    def validate_translation_entries(entries)
+      invalid_entry = entries.find do |entry|
+        !entry.key.is_a?(String) || entry.key.empty? ||
+          !entry.text.is_a?(String) ||
+          !entry.source_file.is_a?(String) || entry.source_file.empty?
+      end
+      if invalid_entry
+        source = invalid_entry.source_file || 'unknown source'
+        raise Error, "Invalid translation entry in #{source}: key, text, and source file must be strings"
+      end
+
+      grouped = entries.group_by { |entry| [File.expand_path(entry.source_file), entry.key] }
+      conflicts = grouped.filter_map do |(source_file, key), duplicates|
+        "#{source_file}:#{key}" if duplicates.map(&:text).uniq.size > 1
+      end
+      raise Error, "Conflicting duplicate translation keys: #{conflicts.join(', ')}" if conflicts.any?
+
+      entries.uniq { |entry| [File.expand_path(entry.source_file), entry.key, entry.text] }
     end
 
     def build_results_by_key_for_code_write_back

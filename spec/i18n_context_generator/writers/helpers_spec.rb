@@ -92,5 +92,15 @@ RSpec.describe I18nContextGenerator::Writers::Helpers do
         expect(helper_host.find_swift_files(dir, ignore_patterns: ['**/Pods/**'])).to eq([included_file])
       end
     end
+
+    it 'skips an ignored configured directory root' do
+      Dir.mktmpdir do |dir|
+        build_dir = File.join(dir, 'build')
+        FileUtils.mkdir_p(build_dir)
+        File.write(File.join(build_dir, 'Generated.swift'), 'struct Generated {}')
+
+        expect(helper_host.find_swift_files(build_dir, ignore_patterns: ['**/build/**'])).to be_empty
+      end
+    end
   end
 end

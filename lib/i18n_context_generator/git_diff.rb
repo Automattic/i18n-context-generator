@@ -146,54 +146,92 @@ module I18nContextGenerator
     # to a parent from diff context alone (e.g. large plural/array blocks where the
     # opener isn't in the hunk), falls back to reading the actual file.
     def extract_xml_keys(diff_output, file_path)
-      keys = Set.new
-      current_parent = nil
-      file_line = nil
-      orphaned_item_file_lines = []
+      state = {
+        keys: Set.new,
+        current_parent: nil,
+        current_string: nil,
+        file_line: nil,
+        orphaned_item_file_lines: [],
+        pending_tag: nil
+      }
 
       diff_output.each_line do |line|
-        # Parse hunk header to track position in new file
-        if (hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
-          file_line = hunk[1].to_i
-          next
-        end
-
-        # Skip diff metadata lines
+        next if update_xml_hunk_line?(state, line)
         next if line.start_with?('diff ', 'index ', '--- ', '+++ ')
 
         is_removed = line.start_with?('-')
         is_added = line.start_with?('+')
         content = line.sub(/^[ +-]/, '')
-
-        # Track parent element from any visible line (context, added, or removed)
-        if content =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
-          current_parent = Regexp.last_match(1)
-        elsif content =~ %r{</(?:plurals|string-array)>}
-          current_parent = nil
-        end
-
-        # Process added lines for key extraction
-        if is_added
-          keys << Regexp.last_match(1) if content =~ /<string\s+name=["']([^"']+)["']/
-          keys << Regexp.last_match(1) if content =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
-
-          if content =~ /^\s*<item[\s>]/
-            if current_parent
-              keys << current_parent
-            elsif file_line
-              orphaned_item_file_lines << file_line
-            end
-          end
-        end
-
-        # Context and added lines exist in new file; removed lines do not
-        file_line += 1 if file_line && !is_removed
+        process_xml_diff_content(state, content, added: is_added) unless is_removed
+        state[:file_line] += 1 if state[:file_line] && !is_removed
       end
 
-      # Resolve orphaned items by reading the actual file
-      resolve_orphaned_items(keys, orphaned_item_file_lines, file_path)
+      resolve_orphaned_items(state[:keys], state[:orphaned_item_file_lines], file_path)
 
-      keys
+      state[:keys]
+    end
+
+    def update_xml_hunk_line?(state, line)
+      hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/)
+      return false unless hunk
+
+      state[:file_line] = hunk[1].to_i
+      true
+    end
+
+    def process_xml_diff_content(state, content, added:)
+      state[:keys] << state[:current_parent] if added && state[:current_parent]
+      state[:keys] << state[:current_string] if added && state[:current_string]
+
+      accumulate_xml_opening_tag(state, content, added: added)
+      complete_xml_opening_tag(state) if state.dig(:pending_tag, :content)&.include?('>')
+      track_xml_item_change(state) if added && content.match?(/<item\b/)
+
+      state[:current_string] = nil if content.match?(%r{</string>})
+      state[:current_parent] = nil if content.match?(%r{</(?:plurals|string-array)>})
+    end
+
+    def accumulate_xml_opening_tag(state, content, added:)
+      if state[:pending_tag]
+        state[:pending_tag][:content] << content
+        state[:pending_tag][:added] ||= added
+      elsif (tag_start = content.index(/<(?:string-array|plurals|string)\b/))
+        state[:pending_tag] = { content: content[tag_start..], added: added }
+      end
+    end
+
+    def complete_xml_opening_tag(state)
+      tag = state[:pending_tag]
+      resource = resource_from_opening_tag(tag[:content])
+      if resource
+        state[:keys] << resource[:name] if tag[:added]
+        track_open_xml_resource(state, resource, tag[:content])
+      end
+      state[:pending_tag] = nil
+    end
+
+    def track_open_xml_resource(state, resource, content)
+      if resource[:type] == 'string'
+        state[:current_string] = resource[:name] unless content.include?('</string>')
+      elsif !content.include?("</#{resource[:type]}>")
+        state[:current_parent] = resource[:name]
+      end
+    end
+
+    def track_xml_item_change(state)
+      if state[:current_parent]
+        state[:keys] << state[:current_parent]
+      elsif state[:file_line]
+        state[:orphaned_item_file_lines] << state[:file_line]
+      end
+    end
+
+    def resource_from_opening_tag(tag)
+      type_match = tag.match(/<(string-array|plurals|string)\b/)
+      name_match = tag.match(/\bname\s*=\s*(["'])(.*?)\1/m)
+      return unless type_match && name_match
+
+      { type: type_match[1], name: name_match[2] }
     end
 
     # Build a map of file line numbers to enclosing plural/array resource names,
@@ -203,13 +241,22 @@ module I18nContextGenerator
 
       current_parent = nil
       parent_at_line = {}
+      pending_tag = nil
 
       File.readlines(file_path).each_with_index do |line, index|
-        if line =~ /<(?:plurals|string-array)\s+name=["']([^"']+)["']/
-          current_parent = Regexp.last_match(1)
-        elsif line =~ %r{</(?:plurals|string-array)>}
-          current_parent = nil
+        if pending_tag
+          pending_tag << line
+        elsif (tag_start = line.index(/<(?:plurals|string-array)\b/))
+          pending_tag = line[tag_start..]
         end
+
+        if pending_tag&.include?('>')
+          resource = resource_from_opening_tag(pending_tag)
+          current_parent = resource[:name] if resource
+          pending_tag = nil
+        end
+
+        current_parent = nil if line.match?(%r{</(?:plurals|string-array)>})
         parent_at_line[index + 1] = current_parent
       end
 

@@ -11,6 +11,14 @@ RSpec.describe I18nContextGenerator::Parsers::Base do
       expect(described_class.for('config/translations.yaml')).to be_a(I18nContextGenerator::Parsers::YamlParser)
     end
 
+    it 'passes an explicit locale only to the YAML parser' do
+      yaml_parser = described_class.for('config/translations.yml', locale: 'en')
+
+      expect(yaml_parser.instance_variable_get(:@locale)).to eq('en')
+      expect(described_class.for('config/translations.json', locale: 'en'))
+        .to be_a(I18nContextGenerator::Parsers::JsonParser)
+    end
+
     it 'selects the strings parser for .strings files' do
       expect(described_class.for('ios/Localizable.strings')).to be_a(I18nContextGenerator::Parsers::StringsParser)
     end

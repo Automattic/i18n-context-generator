@@ -62,6 +62,8 @@ module I18nContextGenerator
         end
 
         entries
+      rescue REXML::ParseException => e
+        raise Error, "Failed to parse Android XML translation file #{path}: #{e.message.lines.first&.strip}"
       end
 
       private

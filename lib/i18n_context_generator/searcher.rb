@@ -3,12 +3,14 @@
 require 'find'
 require 'concurrent'
 require_relative 'searcher/comment_masking'
+require_relative 'searcher/match_filtering'
 require_relative 'searcher/source_discovery'
 
 module I18nContextGenerator
   # Finds where translation keys are used in iOS and Android source code.
   class Searcher
     include CommentMasking
+    include MatchFiltering
     include SourceDiscovery
 
     # Represents a code match with surrounding context
@@ -19,21 +21,12 @@ module I18nContextGenerator
     end
 
     # Represents a localization entry discovered directly from source code.
-    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment, :resource_type) do
-      def initialize(key:, file:, line:, text: nil, comment: nil, resource_type: :string)
+    DiscoveredLocalization = Data.define(:key, :file, :line, :text, :comment, :resource_type, :locations) do
+      def initialize(key:, file:, line:, text: nil, comment: nil, resource_type: :string, locations: nil)
+        locations ||= ["#{file}:#{line}"]
         super
       end
     end
-
-    # Patterns that indicate false positive matches (not actual localization usage)
-    FALSE_POSITIVE_PATTERNS = [
-      /==\s*["']/,             # String comparisons like == "yes"
-      /["']\s*==/,             # String comparisons like "yes" ==
-      /!=\s*["']/,             # String comparisons like != "no"
-      /["']\s*!=/,             # String comparisons like "no" !=
-      /\.equals\(["']/,        # Java .equals("string")
-      /contentEquals\(["']/    # Kotlin contentEquals
-    ].freeze
 
     # File extensions to search by platform
     FILE_EXTENSIONS = {
@@ -83,10 +76,11 @@ module I18nContextGenerator
     def detect_platform
       @source_paths.each do |path|
         next unless File.exist?(path)
+        next if File.directory?(path) && ignored?(path, directory: true)
 
         if File.directory?(path)
           Find.find(path) do |f|
-            if File.directory?(f) && ignored?(f)
+            if File.directory?(f) && ignored?(f, directory: true)
               Find.prune
               next
             end
@@ -94,10 +88,11 @@ module I18nContextGenerator
             next unless File.file?(f)
             next if ignored?(f)
 
-            return :ios if f.end_with?('.swift', '.m', '.mm', '.h')
+            return :ios if f.end_with?('.swift', '.m', '.mm')
             return :android if f.end_with?('.kt', '.java')
+            return :android if f.end_with?('.xml') && f.split(File::SEPARATOR).include?('res')
           end
-        elsif !ignored?(path) && path.end_with?('.swift', '.m', '.mm', '.h')
+        elsif !ignored?(path) && path.end_with?('.swift', '.m', '.mm')
           return :ios
         elsif !ignored?(path) && path.end_with?('.kt', '.java')
           return :android
@@ -134,19 +129,29 @@ module I18nContextGenerator
           if File.file?(path)
             files << path if extensions.any? { |ext| path.end_with?(ext) }
           elsif File.directory?(path)
-            # Build a single glob pattern for all extensions
-            ext_pattern = extensions.size == 1 ? "*#{extensions.first}" : "*{#{extensions.join(',')}}"
-            files.concat(Dir.glob(File.join(path, '**', ext_pattern)))
+            next if ignored?(path, directory: true)
+
+            Find.find(path) do |candidate|
+              if File.directory?(candidate)
+                next unless candidate != path && ignored?(candidate, directory: true)
+
+                Find.prune
+              end
+
+              files << candidate if extensions.any? { |extension| candidate.end_with?(extension) }
+            end
           end
         end
 
         # Apply ignore patterns and cache
-        @files_cache = files.reject { |f| ignored?(f) }
+        @files_cache = files.reject { |file| ignored?(file) }.uniq { |file| File.expand_path(file) }
       end
     end
 
-    def ignored?(file)
-      @ignore_patterns.any? { |pattern| pattern.match?(file) }
+    def ignored?(file, directory: false)
+      candidates = [file]
+      candidates << "#{file}/" if directory && !file.end_with?('/')
+      @ignore_patterns.any? { |pattern| candidates.any? { |candidate| pattern.match?(candidate) } }
     end
 
     def search_file(file, patterns, key, enable_multiline: true)
@@ -438,36 +443,6 @@ module I18nContextGenerator
           "stringResource\\s*\\(\\s*string\\.#{escaped}"
         ]
       end
-    end
-
-    def filter_matches(matches, key)
-      seen = Set.new
-      matches.select do |match|
-        location = "#{match.file}:#{match.line}"
-        next false if seen.include?(location)
-        next false if false_positive?(match.match_line, key)
-        next false if translation_file?(match.file)
-
-        seen.add(location)
-      end
-    end
-
-    def false_positive?(line, _key)
-      return false if line.nil? || line.empty?
-
-      FALSE_POSITIVE_PATTERNS.any? { |pattern| pattern.match?(line) }
-    end
-
-    def translation_file?(file)
-      basename = File.basename(file).downcase
-      ext = File.extname(file).downcase
-
-      # Skip translation files - we want code usage, not definitions
-      return true if ext == '.strings'
-      return true if basename == 'strings.xml'
-      return true if file.include?('/res/values') && ext == '.xml'
-
-      false
     end
   end
 end

@@ -68,6 +68,24 @@ RSpec.describe I18nContextGenerator::Writers::AndroidXmlWriter do
       end
     end
 
+    it 'supports reordered attributes, single quotes, and multiline opening tags' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+              <string translatable='true'
+                      formatted="false"
+                      name='flexible_key'>Flexible</string>
+          </resources>
+        XML
+
+        described_class.new.write([build_result('flexible_key', 'Flexible resource')], path)
+
+        output = File.read(path)
+        expect(output).to include("<!-- Context: Flexible resource -->\n    <string translatable='true'")
+      end
+    end
+
     it 'preserves original formatting' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')
