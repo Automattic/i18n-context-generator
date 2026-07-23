@@ -39,6 +39,7 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
           'x-api-key' => 'test-anthropic-key'
         )
         expect(body[:model]).to eq('claude-sonnet-4-6')
+        expect(body[:max_tokens]).to eq(I18nContextGenerator::LLM::Client::MAX_OUTPUT_TOKENS)
         expect(body[:system]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
         expect(body.dig(:output_config, :format, :type)).to eq('json_schema')
         expect(body.dig(:output_config, :format, :schema, :required)).to include('description')

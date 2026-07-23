@@ -24,9 +24,15 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
         expect(keys).to eq(Set['save.button', 'cart+cta', 'key,with,commas'])
         expect(locations).to eq(
-          [path, 'save.button'] => ["#{path}:2"],
-          [path, 'cart+cta'] => ["#{path}:3"],
-          [path, 'key,with,commas'] => ["#{path}:4"]
+          [path, 'save.button'] => [
+            I18nContextGenerator::ChangedLocation.new(file: path, line: 2)
+          ],
+          [path, 'cart+cta'] => [
+            I18nContextGenerator::ChangedLocation.new(file: path, line: 3)
+          ],
+          [path, 'key,with,commas'] => [
+            I18nContextGenerator::ChangedLocation.new(file: path, line: 4)
+          ]
         )
         expect(Open3).to have_received(:capture3).with(
           'git', 'diff', 'danger_base...danger_head', '--', 'Localizable.strings', chdir: dir
@@ -47,6 +53,39 @@ RSpec.describe I18nContextGenerator::GitDiff do
         expect { diff.changed_keys([path]) }.to raise_error(
           I18nContextGenerator::Error,
           /Git diff failed for danger_base\.\.\.danger_head.*fatal: bad revision/
+        )
+      end
+    end
+
+    it 'projects typed Android XML locations through the public key API' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+            <string name="existing">Existing</string>
+            <string name="new_key">New</string>
+          </resources>
+        XML
+        status = instance_double(Process::Status, success?: true)
+        diff_output = <<~DIFF
+          diff --git a/strings.xml b/strings.xml
+          index abc1234..def5678 100644
+          --- a/strings.xml
+          +++ b/strings.xml
+          @@ -1,3 +1,4 @@
+           <resources>
+             <string name="existing">Existing</string>
+          +  <string name="new_key">New</string>
+           </resources>
+        DIFF
+        allow(Open3).to receive(:capture3).and_return([diff_output, '', status])
+        diff = described_class.new(base_ref: 'danger_base', head_ref: 'danger_head')
+
+        expect(diff.changed_keys([path])).to eq(Set['new_key'])
+        expect(diff.changed_key_locations([path])).to eq(
+          [path, 'new_key'] => [
+            I18nContextGenerator::ChangedLocation.new(file: path, line: 3)
+          ]
         )
       end
     end
@@ -99,6 +138,53 @@ RSpec.describe I18nContextGenerator::GitDiff do
         end
       end
     end
+
+    it 'keeps added content that resembles a diff file header' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'script.rb')
+        File.write(path, "++ added content\n")
+        status = instance_double(Process::Status, success?: true)
+        diff_output = <<~DIFF
+          diff --git a/script.rb b/script.rb
+          index abc1234..def5678 100644
+          --- a/script.rb
+          +++ b/script.rb
+          @@ -10 +10 @@
+          --- removed content
+          +++ added content
+        DIFF
+        allow(Open3).to receive(:capture3).and_return([diff_output, '', status])
+
+        changed_lines = described_class.new(base_ref: 'main').changed_lines([path])
+
+        expect(changed_lines.fetch(path)).to eq(Set[10])
+      end
+    end
+  end
+
+  describe 'changed diff line iteration' do
+    it 'keeps removed and added content that resembles diff file headers' do
+      diff_output = <<~DIFF
+        diff --git a/example.txt b/example.txt
+        --- a/example.txt
+        +++ b/example.txt
+        @@ -10 +10 @@
+        --- removed content
+        +++ added content
+      DIFF
+      changes = []
+
+      described_class.new.send(:each_changed_diff_line, diff_output) do |content, old_line, new_line, side|
+        changes << [content.chomp, old_line, new_line, side]
+      end
+
+      expect(changes).to eq(
+        [
+          ['-- removed content', 10, nil, :left],
+          ['++ added content', nil, 10, :right]
+        ]
+      )
+    end
   end
 
   describe '#changed_keys' do
@@ -143,7 +229,16 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +"another.key" = "Another";
         DIFF
 
-        keys = diff.send(:extract_strings_keys, diff_output)
+        keys = diff.send(
+          :extract_strings_key_locations,
+          diff_output,
+          'Localizable.strings',
+          head_content: <<~STRINGS
+            "existing.key" = "Existing";
+            "new.key" = "New String";
+            "another.key" = "Another";
+          STRINGS
+        ).keys.to_set
 
         expect(keys).to include('new.key')
         expect(keys).to include('another.key')
@@ -160,7 +255,15 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +"modified.key" = "Modified";
         DIFF
 
-        keys = diff.send(:extract_strings_keys, diff_output)
+        keys = diff.send(
+          :extract_strings_key_locations,
+          diff_output,
+          'Localizable.strings',
+          head_content: <<~STRINGS
+            "kept.key" = "Kept";
+            "modified.key" = "Modified";
+          STRINGS
+        ).keys.to_set
 
         expect(keys).to include('modified.key')
         expect(keys).not_to include('removed.key')
@@ -177,7 +280,15 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +"real.key" = "Real";
         DIFF
 
-        keys = diff.send(:extract_strings_keys, diff_output)
+        keys = diff.send(
+          :extract_strings_key_locations,
+          diff_output,
+          'Localizable.strings',
+          head_content: <<~STRINGS
+            "old" = "Old";
+            "real.key" = "Real";
+          STRINGS
+        ).keys.to_set
 
         expect(keys).to include('real.key')
         expect(keys.size).to eq(1)
@@ -198,7 +309,11 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
           locations = diff.send(:extract_strings_key_locations, diff_output, path)
 
-          expect(locations).to eq('save.button' => ["#{path}:1"])
+          expect(locations).to eq(
+            'save.button' => [
+              I18nContextGenerator::ChangedLocation.new(file: path, line: 1)
+            ]
+          )
         end
       end
 
@@ -209,7 +324,14 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +"quote\"key" = "Quoted";
         DIFF
 
-        expect(diff.send(:extract_strings_keys, diff_output)).to eq(Set['quote"key'])
+        locations = diff.send(
+          :extract_strings_key_locations,
+          diff_output,
+          'Localizable.strings',
+          head_content: "\"quote\\\"key\" = \"Quoted\";\n"
+        )
+
+        expect(locations.keys).to eq(['quote"key'])
       end
 
       it 'retains the left side and a head fallback for a removed translator comment' do
@@ -258,7 +380,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
            </resources>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('new_key')
         expect(keys).to include('another_key')
@@ -275,7 +397,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +            name='flexible_key'>Flexible</string>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('flexible_key')
       end
@@ -291,7 +413,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +    </string-array>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to eq(Set['weekdays'])
       end
@@ -307,7 +429,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +    </plurals>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('item_count')
       end
@@ -324,7 +446,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
                </plurals>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('post_likes')
       end
@@ -342,7 +464,14 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
         locations = diff.send(:extract_xml_key_locations, diff_output, 'res/values/strings.xml')
 
-        expect(locations).to eq('post_likes' => ['res/values/strings.xml:7'])
+        expect(locations).to eq(
+          'post_likes' => [
+            I18nContextGenerator::ChangedLocation.new(
+              file: 'res/values/strings.xml',
+              line: 7
+            )
+          ]
+        )
       end
 
       it 'tracks parent from context lines for changed items in string-array' do
@@ -357,7 +486,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
                </string-array>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('weekdays')
       end
@@ -373,7 +502,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
           +    <string name="standalone">New standalone</string>
         DIFF
 
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent').keys.to_set
 
         expect(keys).to include('standalone')
         expect(keys).not_to include('old_plural')
@@ -401,7 +530,11 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
           locations = diff.send(:extract_xml_key_locations, diff_output, path)
 
-          expect(locations).to eq('save_button' => ["#{path}:2"])
+          expect(locations).to eq(
+            'save_button' => [
+              I18nContextGenerator::ChangedLocation.new(file: path, line: 2)
+            ]
+          )
         end
       end
 
@@ -416,7 +549,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
              </plurals>
         DIFF
 
-        expect(diff.send(:extract_xml_keys, diff_output, '/nonexistent')).to be_empty
+        expect(diff.send(:extract_xml_key_locations, diff_output, '/nonexistent')).to be_empty
       end
 
       it 'ignores resource-shaped tags inside XML comments' do
@@ -428,7 +561,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
            </resources>
         DIFF
 
-        expect(diff.send(:extract_xml_keys, diff_output, '/nonexistent')).to be_empty
+        expect(diff.send(:extract_xml_key_locations, diff_output, '/nonexistent')).to be_empty
       end
 
       it 'retains the left side and a head fallback for a removed translator comment' do
@@ -499,7 +632,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
                  </string-array>
           DIFF
 
-          keys = diff.send(:extract_xml_keys, diff_output, xml_path)
+          keys = diff.send(:extract_xml_key_locations, diff_output, xml_path).keys.to_set
 
           expect(keys).to include('big_array')
         end
@@ -515,7 +648,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
         DIFF
 
         # Should not raise, just return what it can
-        keys = diff.send(:extract_xml_keys, diff_output, '/nonexistent/path.xml')
+        keys = diff.send(:extract_xml_key_locations, diff_output, '/nonexistent/path.xml').keys.to_set
 
         expect(keys).to be_a(Set)
       end
@@ -552,7 +685,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
                      <item>Blue</item>
           DIFF
 
-          keys = diff.send(:extract_xml_keys, diff_output, xml_path)
+          keys = diff.send(:extract_xml_key_locations, diff_output, xml_path).keys.to_set
 
           expect(keys).to include('first')
           expect(keys).to include('colors')
@@ -592,38 +725,6 @@ RSpec.describe I18nContextGenerator::GitDiff do
           )
         )
       end
-    end
-  end
-
-  describe '#extract_keys_from_diff' do
-    it 'routes .strings files to extract_strings_keys' do
-      diff = described_class.new(base_ref: 'main')
-
-      diff_output = "+\"some.key\" = \"value\";\n"
-      keys = diff.send(:extract_keys_from_diff, diff_output, 'Localizable.strings')
-
-      expect(keys).to include('some.key')
-    end
-
-    it 'routes .xml files to extract_xml_keys' do
-      diff = described_class.new(base_ref: 'main')
-
-      diff_output = <<~DIFF
-        @@ -1,2 +1,3 @@
-        +    <string name="xml_key">value</string>
-      DIFF
-
-      keys = diff.send(:extract_keys_from_diff, diff_output, 'res/values/strings.xml')
-
-      expect(keys).to include('xml_key')
-    end
-
-    it 'returns empty set for unsupported extensions' do
-      diff = described_class.new(base_ref: 'main')
-
-      keys = diff.send(:extract_keys_from_diff, 'some diff', 'file.json')
-
-      expect(keys).to be_empty
     end
   end
 

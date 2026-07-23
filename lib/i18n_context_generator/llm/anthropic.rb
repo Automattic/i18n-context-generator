@@ -53,7 +53,7 @@ module I18nContextGenerator
           },
           body: {
             model: model,
-            max_tokens: 500,
+            max_tokens: MAX_OUTPUT_TOKENS,
             system: SYSTEM_PROMPT,
             messages: [{ role: 'user', content: prompt }],
             output_config: {

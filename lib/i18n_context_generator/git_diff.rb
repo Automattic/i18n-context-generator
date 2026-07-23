@@ -123,20 +123,29 @@ module I18nContextGenerator
       changed_lines = Hash.new { |h, k| h[k] = Set.new }
       current_file = File.file?(path) ? path : nil
       file_line = nil
+      in_hunk = false
 
       diff_output.each_line do |line|
-        if (match = line.match(%r{^\+\+\+ b/(.+)$}))
+        if line.start_with?('diff ')
+          file_line = nil
+          in_hunk = false
+          next
+        end
+
+        if !in_hunk && (match = line.match(%r{^\+\+\+ b/(.+)$}))
           current_file = resolve_diff_file_path(path, match[1])
           next
         end
 
         if (hunk = line.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
           file_line = hunk[1].to_i
+          in_hunk = true
           next
         end
 
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
-        next if file_line.nil? || current_file.nil?
+        next if !in_hunk && line.start_with?('index ', '--- ', '+++ ')
+        next if line.start_with?('\\')
+        next if !in_hunk || file_line.nil? || current_file.nil?
 
         if line.start_with?('+')
           changed_lines[current_file] << file_line
@@ -185,37 +194,6 @@ module I18nContextGenerator
       source.each do |file, lines|
         target[file].merge(lines)
       end
-    end
-
-    def extract_keys_from_diff(diff_output, path)
-      ext = File.extname(path).downcase
-
-      case ext
-      when '.strings'
-        extract_strings_keys(diff_output)
-      when '.xcstrings'
-        extract_xcstrings_key_locations(diff_output, path).keys.to_set
-      when '.xml'
-        extract_xml_keys(diff_output, path)
-      else
-        Set.new
-      end
-    end
-
-    # Extract keys from iOS .strings diff
-    # Looks for added lines like: +"key" = "value";
-    def extract_strings_keys(diff_output)
-      keys = Set.new
-
-      diff_output.each_line do |line|
-        # Match added or modified lines (start with +, not ++)
-        next unless line.start_with?('+') && !line.start_with?('++')
-
-        key = AppleStringLiteral.assignment_key(line.delete_prefix('+'))
-        keys << key if key
-      end
-
-      keys
     end
 
     def extract_strings_key_locations(diff_output, file_path, base_content: nil, head_content: nil)
@@ -337,15 +315,25 @@ module I18nContextGenerator
     def each_changed_diff_line(diff_output)
       old_line_number = nil
       new_line_number = nil
+      in_hunk = false
 
       diff_output.each_line do |line|
+        if line.start_with?('diff ')
+          old_line_number = nil
+          new_line_number = nil
+          in_hunk = false
+          next
+        end
+
         if (match = line.match(/^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/))
           old_line_number = match[1].to_i
           new_line_number = match[2].to_i
+          in_hunk = true
           next
         end
-        next if old_line_number.nil? || new_line_number.nil?
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ', '\\')
+        next if !in_hunk && line.start_with?('index ', '--- ', '+++ ')
+        next if line.start_with?('\\')
+        next if !in_hunk || old_line_number.nil? || new_line_number.nil?
 
         if line.start_with?('+')
           yield(line[1..], nil, new_line_number, :right)

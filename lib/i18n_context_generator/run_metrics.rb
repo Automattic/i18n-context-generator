@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 module I18nContextGenerator
+  RUN_METRICS_PRICING_AS_OF = '2026-07-23'
   RUN_METRICS_PRICES_PER_MILLION = {
     ['anthropic', 'claude-sonnet-4-6'] => { input: 3.0, output: 15.0 },
     ['openai', 'gpt-5-mini'] => { input: 0.25, output: 2.0 }
@@ -10,7 +11,7 @@ module I18nContextGenerator
   # on documented standard list prices for the built-in default models.
   RunMetrics = Data.define(
     :request_count, :cache_hits, :input_tokens, :output_tokens,
-    :retry_count, :estimated_cost_usd, :cost_model
+    :retry_count, :estimated_cost_usd, :cost_model, :cost_pricing_as_of
   ) do
     def self.from(results, provider:, model:)
       input_tokens = results.sum { |result| result.input_tokens.to_i }
@@ -25,7 +26,8 @@ module I18nContextGenerator
         output_tokens: output_tokens,
         retry_count: results.sum { |result| result.retries.to_i },
         estimated_cost_usd: estimated_cost&.round(8),
-        cost_model: price ? model.to_s : nil
+        cost_model: price ? model.to_s : nil,
+        cost_pricing_as_of: price ? RUN_METRICS_PRICING_AS_OF : nil
       )
     end
 
@@ -37,7 +39,8 @@ module I18nContextGenerator
         output_tokens: output_tokens,
         retry_count: retry_count,
         estimated_cost_usd: estimated_cost_usd,
-        cost_model: cost_model
+        cost_model: cost_model,
+        cost_pricing_as_of: cost_pricing_as_of
       }
     end
   end

@@ -58,6 +58,10 @@ module I18nContextGenerator
 
       return if pre_extraction_stage_handled?(entries)
 
+      # Provider construction validates credentials. Resolve it once on the
+      # caller thread so a configuration error is reported once instead of
+      # being duplicated by every worker.
+      llm
       process_entries(entries)
       @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
 

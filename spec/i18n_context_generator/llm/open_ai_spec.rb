@@ -42,6 +42,7 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
         expect(headers).to eq('Authorization' => 'Bearer test-openai-key')
         expect(body[:model]).to eq('gpt-4.1-mini')
         expect(body[:store]).to be(false)
+        expect(body[:max_output_tokens]).to eq(I18nContextGenerator::LLM::Client::MAX_OUTPUT_TOKENS)
         expect(body[:instructions]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
         expect(body[:input]).to include('settings.title')
         expect(body.dig(:text, :format, :type)).to eq('json_schema')

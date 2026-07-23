@@ -34,7 +34,13 @@ module I18nContextGenerator
           "tokens: #{@metrics.input_tokens} in / #{@metrics.output_tokens} out",
           "retries: #{@metrics.retry_count}"
         ].join(', ')
-        summary += format(', estimated cost: $%.6f', @metrics.estimated_cost_usd) if @metrics.estimated_cost_usd
+        if @metrics.estimated_cost_usd
+          summary += format(
+            ', estimated cost: $%<cost>.6f (standard list prices as of %<date>s)',
+            cost: @metrics.estimated_cost_usd,
+            date: @metrics.cost_pricing_as_of
+          )
+        end
         log summary
       end
 

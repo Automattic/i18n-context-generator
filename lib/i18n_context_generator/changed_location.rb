@@ -39,14 +39,6 @@ module I18nContextGenerator
       side.to_s.upcase
     end
 
-    # Preserve equality for clients that previously compared location strings.
-    # New code should use the typed attributes instead.
-    def ==(other)
-      return to_s == other if other.is_a?(String)
-
-      super
-    end
-
     def to_s
       "#{file}:#{line}"
     end

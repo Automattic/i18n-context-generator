@@ -54,7 +54,7 @@ module I18nContextGenerator
             store: false,
             instructions: SYSTEM_PROMPT,
             input: prompt,
-            max_output_tokens: 500,
+            max_output_tokens: MAX_OUTPUT_TOKENS,
             text: {
               format: {
                 type: 'json_schema',

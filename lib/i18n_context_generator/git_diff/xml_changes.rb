@@ -9,15 +9,6 @@ module I18nContextGenerator
   module GitDiffXmlChanges
     private
 
-    def extract_xml_keys(diff_output, file_path, base_content: nil, head_content: nil)
-      extract_xml_changes(
-        diff_output,
-        file_path,
-        base_content: base_content,
-        head_content: head_content
-      )[:keys]
-    end
-
     def extract_xml_key_locations(diff_output, file_path, base_content: nil, head_content: nil)
       extract_xml_changes(
         diff_output,

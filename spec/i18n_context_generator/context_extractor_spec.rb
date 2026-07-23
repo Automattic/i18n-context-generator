@@ -550,6 +550,34 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(extractor).not_to have_received(:process_entries)
     end
 
+    it 'reports a provider configuration error once before starting workers' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        source_paths: [ios_fixtures_path],
+        discovery_mode: 'source'
+      )
+      extractor = described_class.new(config)
+      entries = [
+        build_entry('settings.title', 'Settings'),
+        build_entry('settings.save', 'Save')
+      ]
+      allow(extractor).to receive(:load_entries).and_return(entries)
+      allow(extractor).to receive(:process_entries)
+      allow(I18nContextGenerator::LLM::Client).to receive(:for)
+        .and_raise(I18nContextGenerator::Error, 'ANTHROPIC_API_KEY environment variable is required')
+
+      expect { extractor.run }
+        .to raise_error(
+          I18nContextGenerator::Error,
+          'ANTHROPIC_API_KEY environment variable is required'
+        )
+
+      expect(I18nContextGenerator::LLM::Client).to have_received(:for).once
+      expect(extractor).not_to have_received(:process_entries)
+      expect(extractor.errors).to be_empty
+      expect(extractor.results).to be_empty
+    end
+
     it 'passes the once-resolved platform into source discovery' do
       Dir.mktmpdir do |source_dir|
         config = I18nContextGenerator::Config.new(
@@ -730,6 +758,39 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect { extractor.send(:log, 'Requests: 3, retries: 2') }
         .to output('').to_stdout
         .and output(/Requests: 3, retries: 2/).to_stderr
+    end
+  end
+
+  describe '#log_metrics' do
+    it 'labels estimated cost with its standard-price date' do
+      output = StringIO.new
+      extractor = described_class.new(
+        I18nContextGenerator::Config.new(translations: [], provider: 'openai'),
+        log_output: output
+      )
+      result = described_class::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title',
+        input_tokens: 200,
+        output_tokens: 40,
+        request_count: 1
+      )
+      extractor.instance_variable_set(
+        :@metrics,
+        I18nContextGenerator::RunMetrics.from(
+          [result],
+          provider: 'openai',
+          model: 'gpt-5-mini'
+        )
+      )
+
+      extractor.send(:log_metrics)
+
+      expect(output.string).to include(
+        'estimated cost: $0.000130',
+        "standard list prices as of #{I18nContextGenerator::RUN_METRICS_PRICING_AS_OF}"
+      )
     end
   end
 

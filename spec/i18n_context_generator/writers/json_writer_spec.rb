@@ -66,7 +66,25 @@ RSpec.describe I18nContextGenerator::Writers::JsonWriter do
         expect(output['entries'].first.dig('telemetry', 'retries')).to eq(1)
         expect(output.dig('metrics', 'request_count')).to eq(1)
         expect(output.dig('metrics', 'estimated_cost_usd')).to eq(0.00013)
+        expect(output.dig('metrics', 'cost_model')).to eq('gpt-5-mini')
+        expect(output.dig('metrics', 'cost_pricing_as_of')).to eq(
+          I18nContextGenerator::RUN_METRICS_PRICING_AS_OF
+        )
       end
+    end
+
+    it 'does not imply a pricing basis for an unknown model' do
+      metrics = I18nContextGenerator::RunMetrics.from(
+        [],
+        provider: 'openai',
+        model: 'custom-model'
+      )
+
+      expect(metrics.to_h).to include(
+        estimated_cost_usd: nil,
+        cost_model: nil,
+        cost_pricing_as_of: nil
+      )
     end
 
     it 'writes parseable JSON directly to stdout' do
