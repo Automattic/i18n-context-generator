@@ -55,7 +55,13 @@ RSpec.describe I18nContextGenerator::Config do
       config = described_class.new(swift_functions: %w[MyLocalizedString NSLocalizedString])
 
       expect(config.swift_functions).to eq(
-        ['NSLocalizedString', 'String(localized:', 'Text(', 'MyLocalizedString']
+        [
+          'NSLocalizedString',
+          'String(localized:',
+          'Text(',
+          'LocalizedStringResource(',
+          'MyLocalizedString'
+        ]
       )
     end
 
@@ -519,6 +525,41 @@ RSpec.describe I18nContextGenerator::Config do
 
       config = described_class.new(output_path: 'context.json', output_format: 'csv')
       expect { config.validate! }.to raise_error(I18nContextGenerator::Error, /does not match .json path/)
+    end
+
+    it 'requires an explicit model and safe endpoint for OpenAI-compatible providers' do
+      valid = described_class.new(
+        provider: 'openai_compatible',
+        model: 'local-model',
+        endpoint: 'http://127.0.0.1:11434/v1/responses'
+      )
+
+      expect(valid.validate!).to be(valid)
+
+      missing = described_class.new(provider: 'openai_compatible')
+      expect { missing.validate! }
+        .to raise_error(
+          I18nContextGenerator::Error,
+          /requires an explicit model.*requires llm\.endpoint/
+        )
+
+      unsafe = described_class.new(
+        provider: 'openai_compatible',
+        model: 'remote-model',
+        endpoint: 'http://llm.example.test/v1/responses'
+      )
+      expect { unsafe.validate! }
+        .to raise_error(I18nContextGenerator::Error, /plain HTTP.*loopback/)
+    end
+
+    it 'rejects provider endpoints on built-in remote providers' do
+      config = described_class.new(
+        provider: 'openai',
+        endpoint: 'https://llm.example.test/v1/responses'
+      )
+
+      expect { config.validate! }
+        .to raise_error(I18nContextGenerator::Error, /supported only with the openai_compatible provider/)
     end
 
     it 'rejects missing output directories and unsupported output extensions' do

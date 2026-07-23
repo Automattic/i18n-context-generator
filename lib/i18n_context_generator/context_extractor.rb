@@ -5,6 +5,7 @@ require_relative 'context_extractor/run_logging'
 require_relative 'context_extractor/source_entries'
 require_relative 'context_extractor/translation_filters'
 require_relative 'context_extractor/cache_identity'
+require_relative 'context_extractor/extraction_result'
 
 module I18nContextGenerator
   # Main orchestrator that parses translation files, searches source code for usages,
@@ -17,57 +18,13 @@ module I18nContextGenerator
     include TranslationFilters
     include CacheIdentity
 
-    # Result for a single translation key
-    ExtractionResult = Data.define(:key, :text, :description, :source_file, :ui_element, :tone,
-                                   :max_length, :locations, :changed_locations, :translation_key,
-                                   :changed_location_groups, :changed_translation_locations, :status, :error) do
-      def initialize(key:, text:, description:, **attributes)
-        defaults = {
-          source_file: nil,
-          ui_element: nil,
-          tone: nil,
-          max_length: nil,
-          locations: [],
-          changed_locations: [],
-          changed_location_groups: [],
-          translation_key: key,
-          changed_translation_locations: [],
-          status: attributes[:error] ? :error : :success,
-          error: nil
-        }
-        values = defaults.merge(attributes)
-        values[:status] = values[:status].to_sym if values[:status].respond_to?(:to_sym)
-        super(key: key, text: text, description: description, **values)
-      end
-
-      def actionable? = status == :success && error.nil? && !description.to_s.strip.empty?
-
-      def to_h
-        {
-          key: key,
-          text: text,
-          description: description,
-          source_file: source_file,
-          ui_element: ui_element,
-          tone: tone,
-          max_length: max_length,
-          locations: locations,
-          changed_locations: changed_locations,
-          changed_location_groups: changed_location_groups,
-          translation_key: translation_key,
-          changed_translation_locations: changed_translation_locations,
-          status: status,
-          error: error
-        }
-      end
-    end
-
-    attr_reader :results, :errors
+    attr_reader :results, :errors, :metrics
 
     def initialize(config)
       @config = config
       @results = Concurrent::Array.new
       @errors = Concurrent::Array.new
+      @metrics = RunMetrics.from([], provider: @config.provider, model: resolved_model)
 
       # Defer initialization of expensive resources
       @searcher = nil
@@ -99,6 +56,7 @@ module I18nContextGenerator
       end
 
       process_entries(entries)
+      @metrics = RunMetrics.from(@results, provider: @config.provider, model: resolved_model)
 
       if @config.output_path
         write_output
@@ -110,6 +68,7 @@ module I18nContextGenerator
       write_back_to_code if @config.write_back_to_code
 
       puts "Errors: #{@errors.size}" if @errors.any?
+      log_metrics
     end
 
     private
@@ -125,7 +84,7 @@ module I18nContextGenerator
     end
 
     def llm
-      @llm ||= LLM::Client.for(@config.provider)
+      @llm ||= LLM::Client.for(@config.provider, endpoint: @config.endpoint)
     end
 
     def cache
@@ -289,6 +248,12 @@ module I18nContextGenerator
         ui_element: llm_result.ui_element,
         tone: llm_result.tone,
         max_length: llm_result.max_length,
+        confidence: llm_result.confidence,
+        ambiguity_reason: llm_result.ambiguity_reason,
+        request_count: llm_result.request_count,
+        input_tokens: llm_result.input_tokens,
+        output_tokens: llm_result.output_tokens,
+        retries: llm_result.retries,
         locations: result_locations,
         **changed_location_attributes_for(entry, result_locations),
         translation_key: translation_key_for(entry),
@@ -302,7 +267,8 @@ module I18nContextGenerator
           entry.key,
           entry.text,
           result.to_h.except(
-            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations
+            :source_file, :changed_locations, :changed_location_groups, :changed_translation_locations,
+            :cache_hit, :request_count, :input_tokens, :output_tokens, :retries
           ),
           context: cache_ctx
         )
@@ -313,7 +279,8 @@ module I18nContextGenerator
     def cached_extraction_result(entry, cached, matches)
       attributes = cached.transform_keys(&:to_sym).except(
         :source_file, :locations, :changed_locations, :changed_location_groups,
-        :translation_key, :changed_translation_locations
+        :translation_key, :changed_translation_locations,
+        :cache_hit, :request_count, :input_tokens, :output_tokens, :retries
       )
       locations = result_locations_for(entry, matches)
       ExtractionResult.new(
@@ -322,6 +289,7 @@ module I18nContextGenerator
         **changed_location_attributes_for(entry, locations),
         translation_key: translation_key_for(entry),
         changed_translation_locations: changed_translation_locations_for(entry),
+        cache_hit: true,
         **attributes
       )
     end
@@ -334,7 +302,7 @@ module I18nContextGenerator
                  Writers::CsvWriter.new
                end
 
-      writer.write(@results, @config.output_path)
+      writer.write(@results, @config.output_path, metrics: @metrics)
     end
 
     def write_back_to_source

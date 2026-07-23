@@ -1391,7 +1391,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       extractor.send(:write_output)
 
-      expect(writer).to have_received(:write).with(extractor.results, 'out.json')
+      expect(writer).to have_received(:write).with(
+        extractor.results,
+        'out.json',
+        metrics: extractor.metrics
+      )
     end
 
     it 'uses the CSV writer for non-json output' do
@@ -1404,7 +1408,11 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
       extractor.send(:write_output)
 
-      expect(writer).to have_received(:write).with(extractor.results, 'out.csv')
+      expect(writer).to have_received(:write).with(
+        extractor.results,
+        'out.csv',
+        metrics: extractor.metrics
+      )
     end
   end
 

@@ -16,9 +16,11 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
         content: [
           {
             type: 'text',
-            text: '{"description":"Primary save action","ui_element":"button","tone":"neutral","max_length":12}'
+            text: '{"description":"Primary save action","ui_element":"button","tone":"neutral","max_length":12,' \
+                  '"confidence":"high","ambiguity_reason":null}'
           }
-        ]
+        ],
+        usage: { input_tokens: 120, output_tokens: 30 }
       }.to_json
     end
     let(:response) do
@@ -55,6 +57,13 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
       expect(result.ui_element).to eq('button')
       expect(result.tone).to eq('neutral')
       expect(result.max_length).to eq(12)
+      expect(result.confidence).to eq('high')
+      expect(result).to have_attributes(
+        input_tokens: 120,
+        output_tokens: 30,
+        request_count: 1,
+        retries: 0
+      )
       expect(result.error).to be_nil
     end
 

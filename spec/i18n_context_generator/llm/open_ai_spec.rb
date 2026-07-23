@@ -19,11 +19,13 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
             content: [
               {
                 type: 'output_text',
-                text: '{"description":"Navigation title for settings","ui_element":"title","tone":"neutral","max_length":18}'
+                text: '{"description":"Navigation title for settings","ui_element":"title","tone":"neutral",' \
+                      '"max_length":18,"confidence":"medium","ambiguity_reason":"Only one usage was supplied"}'
               }
             ]
           }
-        ]
+        ],
+        usage: { input_tokens: 200, output_tokens: 40 }
       }.to_json
     end
     let(:response) do
@@ -59,6 +61,14 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
       expect(result.ui_element).to eq('title')
       expect(result.tone).to eq('neutral')
       expect(result.max_length).to eq(18)
+      expect(result.confidence).to eq('medium')
+      expect(result.ambiguity_reason).to eq('Only one usage was supplied')
+      expect(result).to have_attributes(
+        input_tokens: 200,
+        output_tokens: 40,
+        request_count: 1,
+        retries: 0
+      )
       expect(result.error).to be_nil
     end
 

@@ -16,7 +16,7 @@ module I18nContextGenerator
                 :swift_functions, :write_back_to_code, :diff_base, :diff_head, :context_prefix,
                 :context_mode, :start_key, :end_key, :include_file_paths,
                 :include_translation_comments, :redact_prompts, :discovery_mode,
-                :platform, :translation_locales, :max_prompt_chars, :cache_dir
+                :platform, :translation_locales, :max_prompt_chars, :cache_dir, :endpoint
 
     DEFAULT_CONTEXT_PREFIX = Schema.default(:context_prefix).freeze
     DEFAULT_CONTEXT_MODE = Schema.default(:context_mode).freeze
@@ -37,6 +37,7 @@ module I18nContextGenerator
       @ignore_patterns = self.class.merge_ignore_patterns(fetch_defaulting_value(attrs, :ignore_patterns, Schema.default(:ignore_patterns)))
       @provider = normalize_enum_value(fetch_defaulting_value(attrs, :provider, Schema.default(:provider)))
       @model = fetch_config_value(attrs, :model, nil)
+      @endpoint = fetch_config_value(attrs, :endpoint, nil)
       @concurrency = fetch_defaulting_value(attrs, :concurrency, Schema.default(:concurrency))
       @context_lines = fetch_defaulting_value(attrs, :context_lines, Schema.default(:context_lines))
       @max_matches_per_key = fetch_defaulting_value(attrs, :max_matches_per_key, Schema.default(:max_matches_per_key))
@@ -96,6 +97,7 @@ module I18nContextGenerator
         ignore_patterns: Schema.value(yaml, :ignore_patterns),
         provider: Schema.value(yaml, :provider),
         model: Schema.value(yaml, :model),
+        endpoint: Schema.value(yaml, :endpoint),
         concurrency: Schema.value(yaml, :concurrency),
         context_lines: Schema.value(yaml, :context_lines),
         max_matches_per_key: Schema.value(yaml, :max_matches_per_key),
@@ -146,6 +148,7 @@ module I18nContextGenerator
         ignore_patterns: [],
         provider: options[:provider] || Schema.default(:provider),
         model: options[:model],
+        endpoint: options[:endpoint],
         concurrency: options[:concurrency] || Schema.default(:concurrency),
         context_lines: Schema.default(:context_lines),
         max_matches_per_key: Schema.default(:max_matches_per_key),
@@ -310,6 +313,7 @@ module I18nContextGenerator
         concurrency: :concurrency,
         max_prompt_chars: :max_prompt_chars,
         cache_dir: :cache_dir,
+        endpoint: :endpoint,
         discovery_mode: :discovery_mode,
         platform: :platform,
         diff_base: :diff_base,
@@ -332,6 +336,7 @@ module I18nContextGenerator
       if provider && provider != @provider
         @provider = provider
         @model = nil unless options[:model]
+        @endpoint = nil unless options[:endpoint]
       end
       @model = options[:model] if options[:model]
     end

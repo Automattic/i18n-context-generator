@@ -89,6 +89,8 @@ module I18nContextGenerator
       return if dry_run.nil? ? options[:dry_run] : dry_run
 
       provider ||= options[:provider] || 'anthropic'
+      return if provider == 'openai_compatible'
+
       env_var = case provider
                 when 'anthropic' then 'ANTHROPIC_API_KEY'
                 when 'openai' then 'OPENAI_API_KEY'

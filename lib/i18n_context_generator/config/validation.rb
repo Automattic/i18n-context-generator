@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'uri'
 require_relative '../file_classifier'
 
 module I18nContextGenerator
@@ -11,7 +12,7 @@ module I18nContextGenerator
         include_translation_comments redact_prompts
       ].freeze
       OPTIONAL_STRING_OPTIONS = %i[
-        model output_path key_filter diff_base diff_head start_key end_key platform
+        model endpoint output_path key_filter diff_base diff_head start_key end_key platform
       ].freeze
       TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xml].freeze
 
@@ -20,6 +21,7 @@ module I18nContextGenerator
         validate_collections(errors)
         validate_scalars(errors)
         validate_domains(errors)
+        validate_provider_endpoint(errors)
         validate_configured_paths(errors)
         validate_output(errors)
         validate_cache(errors)
@@ -74,6 +76,31 @@ module I18nContextGenerator
         validate_inclusion(errors, :context_mode, @context_mode, VALID_CONTEXT_MODES)
         validate_inclusion(errors, :discovery_mode, @discovery_mode, VALID_DISCOVERY_MODES)
         validate_inclusion(errors, :platform, @platform, VALID_PLATFORMS) unless @platform.nil?
+      end
+
+      def validate_provider_endpoint(errors)
+        if @provider == 'openai_compatible'
+          errors << 'openai_compatible provider requires an explicit model' if @model.nil?
+          if @endpoint.nil?
+            errors << 'openai_compatible provider requires llm.endpoint'
+          else
+            validate_endpoint_uri(errors)
+          end
+        elsif @endpoint
+          errors << 'llm.endpoint is supported only with the openai_compatible provider'
+        end
+      end
+
+      def validate_endpoint_uri(errors)
+        uri = URI.parse(@endpoint)
+        valid_scheme = %w[http https].include?(uri.scheme)
+        errors << 'llm.endpoint must be an absolute HTTP(S) URL' unless valid_scheme && uri.host
+        errors << 'llm.endpoint must not contain credentials, a query, or a fragment' if uri.userinfo || uri.query || uri.fragment
+
+        loopback_hosts = %w[localhost 127.0.0.1 ::1]
+        errors << 'plain HTTP llm.endpoint is allowed only for a loopback host' if uri.scheme == 'http' && !loopback_hosts.include?(uri.host)
+      rescue URI::InvalidURIError
+        errors << 'llm.endpoint must be an absolute HTTP(S) URL'
       end
 
       def validate_configured_paths(errors)

@@ -4,6 +4,7 @@ module I18nContextGenerator
   module LLM
     # Shared retry and HTTP error handling for remote LLM providers.
     module RequestPolicy
+      RequestOutcome = Data.define(:response, :retries)
       MAX_RETRIES = 2
       MAX_RETRY_DELAY = 30.0
       RETRYABLE_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503, 504, 529].freeze
@@ -29,7 +30,7 @@ module I18nContextGenerator
 
         loop do
           response = yield
-          return response unless retryable_response?(response) && retries < MAX_RETRIES
+          return RequestOutcome.new(response: response, retries: retries) unless retryable_response?(response) && retries < MAX_RETRIES
 
           retries += 1
           delay = retry_delay(response, retries)
@@ -69,14 +70,23 @@ module I18nContextGenerator
         nil
       end
 
-      def http_error_result(response)
+      def http_error_result(response, retries: 0)
+        telemetry = { request_count: 1, retries: retries }
         case response.code.to_i
         when 401
-          ContextResult.new(description: 'Authentication failed', error: 'Provider rejected the API credentials')
+          ContextResult.new(
+            description: 'Authentication failed',
+            error: 'Provider rejected the API credentials',
+            **telemetry
+          )
         when 429
-          ContextResult.new(description: 'Rate limited', error: 'Rate limit exceeded - try reducing concurrency')
+          ContextResult.new(
+            description: 'Rate limited',
+            error: 'Rate limit exceeded - try reducing concurrency',
+            **telemetry
+          )
         else
-          ContextResult.new(description: 'API error', error: provider_error_message(response))
+          ContextResult.new(description: 'API error', error: provider_error_message(response), **telemetry)
         end
       end
 

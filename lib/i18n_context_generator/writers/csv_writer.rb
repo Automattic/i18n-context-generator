@@ -4,10 +4,14 @@ module I18nContextGenerator
   module Writers
     # Writes extraction results to a CSV file.
     class CsvWriter
-      HEADERS = %w[key text description ui_element tone max_length locations error].freeze
+      HEADERS = %w[
+        key text description ui_element tone max_length confidence
+        ambiguity_reason locations status cache_hit request_count input_tokens
+        output_tokens retries error
+      ].freeze
       DANGEROUS_CSV_PREFIX = /\A[ \t\r\n]*[=+\-@]/
 
-      def write(results, path)
+      def write(results, path, **_options)
         CSV.open(path, 'w') do |csv|
           csv << HEADERS
 
@@ -19,7 +23,15 @@ module I18nContextGenerator
               sanitize_cell(result.ui_element),
               sanitize_cell(result.tone),
               result.max_length,
+              sanitize_cell(result.confidence),
+              sanitize_cell(result.ambiguity_reason),
               sanitize_cell(result.locations.join(';')),
+              result.status,
+              result.cache_hit,
+              result.request_count,
+              result.input_tokens,
+              result.output_tokens,
+              result.retries,
               sanitize_cell(result.error)
             ]
           end
