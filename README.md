@@ -2,16 +2,17 @@
 
 `i18n-context-generator` generates translator-facing context for your existing localization keys. It reads translation files, finds where each key is used in app code, and asks an LLM to explain the string's UI role in plain language.
 
-You can export the results as CSV or JSON, write them back into `.strings` or `strings.xml`, or update Swift `comment:` arguments directly.
+You can export the results as CSV or JSON, write them back into `.strings`, `.xcstrings`, or `strings.xml`, or update Swift `comment:` arguments directly.
 
 It is designed for mobile codebases. Each run must target either iOS or Android, not both.
 
 ## What It Does
 
-- Parses `.strings`, `strings.xml`, `.json`, and `.yml` or `.yaml` translation files
+- Parses `.strings`, `.xcstrings`, `strings.xml`, `.json`, and `.yml` or `.yaml` translation files
 - Searches Swift, Objective-C, Kotlin, Java, and Android XML for matching usages
-- Uses Anthropic or OpenAI models to infer UI context
+- Uses Anthropic, OpenAI, or an explicitly configured OpenAI-compatible endpoint to infer UI context
 - Supports diff-based runs, key filters, and key ranges for incremental work
+- Separates validation, planning, patch preview, and mutation into explicit workflow stages
 - Applies best-effort redaction of likely secrets, URLs, and emails by default
 - Optionally caches results to avoid repeating identical LLM work
 
@@ -24,13 +25,12 @@ chmod +x exe/i18n-context-generator
 
 ## Quick Start
 
-Preview what would be processed:
+Plan what would be processed without calling an LLM:
 
 ```bash
-bundle exec exe/i18n-context-generator extract \
+bundle exec exe/i18n-context-generator plan \
   -t ios/MyApp/Resources/Localizable.strings \
-  -s ios/MyApp \
-  --dry-run
+  -s ios/MyApp
 ```
 
 For a real run, set a provider API key:
@@ -77,7 +77,7 @@ bundle exec exe/i18n-context-generator extract \
   --write-back-to-code
 ```
 
-Use `--output`, `--write-back`, or `--write-back-to-code` depending on where you want results to go. If you have both iOS and Android code in the same repository, run the tool separately for each platform.
+Use `--output`, `--stdout`, `--write-back`, or `--write-back-to-code` depending on where you want results to go. `extract` remains an alias for the mutating `apply` workflow. If you have both iOS and Android code in the same repository, run the tool separately for each platform.
 
 ## Configuration
 
@@ -91,6 +91,8 @@ bundle exec exe/i18n-context-generator extract --config .i18n-context-generator.
 Example `.i18n-context-generator.yml`:
 
 ```yaml
+schema_version: 1
+
 translations:
   - path: ios/MyApp/Resources/Localizable.strings
 
@@ -105,6 +107,8 @@ llm:
   provider: anthropic
   # Optional; each provider has its own default model.
   # model: claude-sonnet-4-6
+  # openai_compatible requires an explicit model and endpoint.
+  # endpoint: http://127.0.0.1:11434/v1/responses
 
 processing:
   concurrency: 5
@@ -116,9 +120,13 @@ cache:
   enabled: false
   directory: .i18n-context-generator-cache
 
+workflow:
+  stage: apply
+
 output:
   format: csv
   path: translation-context.csv
+  stdout: false
   write_back: false
   write_back_to_code: false
   context_prefix: "Context: "
@@ -142,27 +150,31 @@ privacy:
 Use a separate config for Android instead of mixing iOS and Android paths in the same run.
 Client `source.ignore` entries extend the built-in ignore list; they do not replace it.
 Configured `swift.functions` extend the built-in defaults and are used consistently for usage search, source-first discovery, and `--write-back-to-code`. A custom function may be written as either `MyLocalizedString` or `MyLocalizedString(`; its first string argument, with or without a label such as `key:`, is treated as the translation key.
+Unversioned configuration files are interpreted as schema version 1 for compatibility. New files should declare `schema_version: 1`; unknown or future options fail validation instead of being ignored. Run `i18n-context-generator config validate [PATH]` to validate a file or add `--print-config` to an extraction command to inspect the fully resolved, secret-free configuration.
 
 ## CLI Reference
 
 ### Inputs and Output
 
-- `-t`, `--translations FILES`: translation files to process, comma-separated
-- `-s`, `--source DIRS`: source files or directories to search, comma-separated
+- `-t`, `--translation FILE`: translation file to process; repeat for multiple files
+- `-s`, `--source PATH`: source file or directory to search; repeat for multiple paths
 - `-c`, `--config PATH`: load options from `.i18n-context-generator.yml`
 - `-o`, `--output PATH`: write results to a file
+- `--stdout`: write structured CSV or JSON to standard output
 - `-f`, `--format csv|json`: output format, default `csv`
+- `--print-config`: print the resolved configuration and exit
 
 ### LLM Settings
 
-- `-p`, `--provider anthropic|openai`: LLM provider, default `anthropic`
+- `-p`, `--provider anthropic|openai|openai_compatible`: LLM provider, default `anthropic`
 - `-m`, `--model MODEL`: explicit model override
+- `--endpoint URL`: explicit Responses API endpoint for `openai_compatible`
 - `--concurrency N`: parallel request count, default `5`
 - `--max-prompt-chars N`: hard character limit per LLM prompt, default `50000`
 
 ### Filtering and Incremental Runs
 
-- `-k`, `--keys PATTERNS`: wildcard key filter such as `settings.*`
+- `-k`, `--key PATTERN`: wildcard key filter such as `settings.*`; repeat for multiple patterns
 - `--diff-base REF`: process only keys changed since a Git ref
 - `--diff-head REF`: compare `--diff-base` to this ref, default `HEAD`
 - `--start-key KEY`: start at a specific key, inclusive
@@ -183,11 +195,32 @@ Configured `swift.functions` extend the built-in defaults and are used consisten
 
 Run `bundle exec exe/i18n-context-generator help extract` for the full command reference.
 
+The legacy `--translations`, `--keys`, and comma-separated list values remain accepted with a deprecation warning. Prefer repeating the singular flags so paths and patterns containing commas are unambiguous.
+
+### Workflow stages
+
+- `check`: validate configuration and confirm source usage without calling the LLM
+- `plan`: list selected keys and destinations without calling the LLM
+- `preview-diff`: generate context and print the exact write-back patch without changing files
+- `apply`: generate context and write to the configured destinations
+- `extract`: compatibility alias for `apply`
+
+`--dry-run` remains available as a compatibility shortcut for non-mutating key selection. Use `preview-diff` when you need to inspect generated write-back content rather than only the selected keys.
+
 ### Prompt privacy and size
 
 Remote-provider runs send translation text and selected source snippets off the machine. By default, full paths are reduced to basenames and the tool applies pattern-based redaction to keys, text, comments, paths, scopes, matched lines, and surrounding context. This is a best-effort safeguard, not a guarantee that all private or identifying data will be detected. Review the source paths and translation comments you configure before using a remote provider.
 
 `processing.max_prompt_chars` bounds each user prompt. When evidence exceeds the limit, surrounding code and optional metadata are truncated deterministically, with the translation key, text, and at least one usage receiving priority. Provider output is validated against the application contract before it can reach an output writer.
+
+For a local or third-party Responses API, select `openai_compatible` and configure both `llm.model` and `llm.endpoint`. Plain HTTP is accepted only for loopback endpoints; remote endpoints must use HTTPS. Authentication is isolated to `OPENAI_COMPATIBLE_API_KEY`, so this provider never implicitly forwards `OPENAI_API_KEY` to a custom host.
+
+```yaml
+llm:
+  provider: openai_compatible
+  model: local-model-name
+  endpoint: http://127.0.0.1:11434/v1/responses
+```
 
 ### Cache behavior
 
@@ -202,9 +235,10 @@ The default directory is `.i18n-context-generator-cache`. Add that directory—o
 | Format | Notes |
 |--------|-------|
 | `.strings` | Apple strings files |
+| `.xcstrings` | Apple string catalogs; reads the source language, comments, and plural variations |
 | `strings.xml` | Android string resources, including plurals and arrays |
-| `.json` | Nested keys are flattened |
-| `.yml`, `.yaml` | Nested keys are flattened; locale roots must be configured explicitly |
+| `.json` | Read-only hydration source; nested keys are flattened |
+| `.yml`, `.yaml` | Read-only hydration source; nested keys are flattened and locale roots must be configured explicitly |
 
 For Rails-style YAML files with a locale root, name that root in the translation entry. Without `locale:`, the top-level key is retained as part of every translation key; locale-shaped application namespaces are never guessed or removed.
 
@@ -218,7 +252,7 @@ translations:
 
 | Platform | Files searched | Typical patterns |
 |----------|----------------|------------------|
-| iOS | `.swift`, `.m`, `.mm`, `.h` | `NSLocalizedString`, `String(localized:)`, `LocalizedStringKey`, `Text`, `.localized` |
+| iOS | `.swift`, `.m`, `.mm`, `.h` | `NSLocalizedString`, `String(localized:)`, `LocalizedStringResource`, `LocalizedStringKey`, `Text`, `.localized` |
 | Android | `.kt`, `.java`, `.xml` | `R.string.*`, `getString(...)`, `stringResource(...)`, `@string/...`, plurals, arrays |
 
 ## Output
@@ -226,11 +260,11 @@ translations:
 CSV example:
 
 ```csv
-key,text,description,ui_element,tone,max_length,locations,error
-settings.title,Settings,Navigation bar title for the main settings screen,navigation,neutral,15,ios/SettingsViewController.swift:17,
-common.save,Save,Primary action button in forms and edit screens,button,neutral,10,ios/ProfileViewController.swift:31,
-error.network,Unable to connect,Error message shown when network requests fail,alert,apologetic,,ios/ProfileViewController.swift:94,
+key,text,description,ui_element,tone,max_length,confidence,ambiguity_reason,locations,status,cache_hit,request_count,input_tokens,output_tokens,retries,error
+settings.title,Settings,Navigation bar title for the main settings screen,navigation,neutral,15,high,,ios/SettingsViewController.swift:17,success,false,1,834,61,0,
 ```
+
+JSON and CSV include per-result confidence, ambiguity, usage locations, token counts, retries, and request count. The Ruby result API additionally retains changed-only and complete evidence locations for review clients. The run summary reports aggregate requests, cache hits, tokens, retries, and an estimated list-price cost when the selected model has known pricing. Cost is informational and does not account for provider-specific discounts or billing adjustments.
 
 With `--write-back`, generated context is written back into translation files:
 

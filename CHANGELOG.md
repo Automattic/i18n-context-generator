@@ -10,15 +10,26 @@ _None_
 
 ### New Features
 
-_None_
+- Support Apple string catalogs (`.xcstrings`) and `LocalizedStringResource` usages.
+- Add explicit `check`, `plan`, `preview-diff`, and `apply` workflow stages.
+- Add structured CSV/JSON stdout output and repeatable singular CLI input flags.
+- Report confidence, ambiguity, request counts, cache hits, token usage, retries,
+  and estimated model cost.
+- Add an explicit, credential-isolated OpenAI-compatible provider for local and
+  HTTPS endpoints.
+- Add a versioned configuration schema, `config validate`, and `--print-config`.
 
 ### Bug Fixes
 
-_None_
+- Preserve Android plural and array parent comments as extraction evidence.
+- Map changed Apple string-catalog values and comments back to their owning keys.
+- Reject unknown configuration and translation-entry keys instead of silently
+  ignoring client typos.
 
 ### Internal Changes
 
-_None_
+- Document why AST extraction and provider batching remain evidence-driven
+  follow-up work.
 
 ## 0.5.0
 
