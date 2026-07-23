@@ -77,7 +77,7 @@ bundle exec exe/i18n-context-generator extract \
   --write-back-to-code
 ```
 
-Use `--output`, `--stdout`, `--write-back`, or `--write-back-to-code` depending on where you want results to go. `extract` remains an alias for the mutating `apply` workflow. If you have both iOS and Android code in the same repository, run the tool separately for each platform.
+Use `--output`, `--stdout`, `--write-back`, or `--write-back-to-code` depending on where you want results to go. `extract` uses the configured `workflow.stage`, which defaults to `apply`; the named workflow commands always select their corresponding stage explicitly. If you have both iOS and Android code in the same repository, run the tool separately for each platform.
 
 ## Configuration
 
@@ -150,7 +150,7 @@ privacy:
 Use a separate config for Android instead of mixing iOS and Android paths in the same run.
 Client `source.ignore` entries extend the built-in ignore list; they do not replace it.
 Configured `swift.functions` extend the built-in defaults and are used consistently for usage search, source-first discovery, and `--write-back-to-code`. A custom function may be written as either `MyLocalizedString` or `MyLocalizedString(`; its first string argument, with or without a label such as `key:`, is treated as the translation key.
-Unversioned configuration files are interpreted as schema version 1 for compatibility. New files should declare `schema_version: 1`; unknown or future options fail validation instead of being ignored. Run `i18n-context-generator config validate [PATH]` to validate a file or add `--print-config` to an extraction command to inspect the fully resolved, secret-free configuration.
+Unversioned configuration files use schema version 1 compatibility mode: unknown options produce warnings and remain ignored as they were before versioning. New files should declare `schema_version: 1`; explicit versioning enables strict unknown-option validation, and future versions fail clearly. Run `i18n-context-generator config validate [PATH]` to validate a file or add `--print-config` to an extraction command to inspect the fully resolved, secret-free configuration.
 
 ## CLI Reference
 
@@ -183,7 +183,7 @@ Unversioned configuration files are interpreted as schema version 1 for compatib
 
 ### Write-Back and Prompt Controls
 
-- `--write-back`: update `.strings` or `strings.xml`
+- `--write-back`: update `.strings`, `.xcstrings`, or `strings.xml`
 - `--write-back-to-code`: update Swift `comment:` arguments
 - `--context-prefix TEXT`: prefix generated comments, default `Context: `
 - `--context-mode replace|append`: replace existing comments or append to them
@@ -195,15 +195,15 @@ Unversioned configuration files are interpreted as schema version 1 for compatib
 
 Run `bundle exec exe/i18n-context-generator help extract` for the full command reference.
 
-The legacy `--translations`, `--keys`, and comma-separated list values remain accepted with a deprecation warning. Prefer repeating the singular flags so paths and patterns containing commas are unambiguous.
+The legacy `--translations` and `--keys` flags still accept comma-separated lists with a deprecation warning. Existing comma-separated path lists are recognized when each path exists. Repeatable singular flags preserve literal commas in paths and key patterns.
 
 ### Workflow stages
 
 - `check`: validate configuration and confirm source usage without calling the LLM
 - `plan`: list selected keys and destinations without calling the LLM
-- `preview-diff`: generate context and print the exact write-back patch without changing files
+- `preview-diff`: generate context and print the exact write-back patch to stdout without changing files; diagnostics go to stderr
 - `apply`: generate context and write to the configured destinations
-- `extract`: compatibility alias for `apply`
+- `extract`: compatibility entry point that uses `workflow.stage` from configuration, defaulting to `apply`
 
 `--dry-run` remains available as a compatibility shortcut for non-mutating key selection. Use `preview-diff` when you need to inspect generated write-back content rather than only the selected keys.
 
@@ -224,7 +224,7 @@ llm:
 
 ### Cache behavior
 
-Caching is opt-in and stores successful results only; provider, resolved model, prompt controls, source context, and source-discovery locations are part of each cache identity. Writes use private temporary files and atomic replacement so concurrent workers cannot leave partial JSON behind.
+Caching is opt-in and stores successful results only; provider, resolved model, custom endpoint, prompt controls, source context, and source-discovery locations are part of each cache identity. Writes use private temporary files and atomic replacement so concurrent workers cannot leave partial JSON behind.
 
 The default directory is `.i18n-context-generator-cache`. Add that directory—or your custom `cache.directory`—to the client repository's `.gitignore`; cached LLM output should not be committed. The generated starter configuration keeps caching disabled by default.
 

@@ -23,8 +23,13 @@ _None_
 
 - Preserve Android plural and array parent comments as extraction evidence.
 - Map changed Apple string-catalog values and comments back to their owning keys.
-- Reject unknown configuration and translation-entry keys instead of silently
-  ignoring client typos.
+- Reject unknown options in explicitly versioned configurations and unknown
+  translation-entry keys instead of silently ignoring client typos.
+- Preserve Apple string-catalog formatting and accept empty placeholder entries.
+- Keep preview patches machine-applicable by isolating diagnostics and preserving
+  hunk contents.
+- Preserve failed-request telemetry, custom-endpoint cache identity, literal
+  commas in repeatable flags, and explicit client overrides.
 
 ### Internal Changes
 
