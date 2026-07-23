@@ -142,6 +142,25 @@ RSpec.describe I18nContextGenerator::Writers::XcstringsWriter do
     end
   end
 
+  it 'adds a comment to an inline compact catalog entry' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'Localizable.xcstrings')
+      original = '{"sourceLanguage":"en","strings":{"target":{}},"version":"1.0"}'
+      File.write(path, original)
+
+      described_class.new.write(
+        [build_result('target', 'Compact context')],
+        path
+      )
+
+      expect(File.read(path)).to eq(
+        '{"sourceLanguage":"en","strings":{"target":{"comment":"Context: Compact context"}},"version":"1.0"}'
+      )
+      expect(Oj.load_file(path).dig('strings', 'target', 'comment'))
+        .to eq('Context: Compact context')
+    end
+  end
+
   it 'appends generated context to a manual catalog comment' do
     Dir.mktmpdir do |dir|
       path = File.join(dir, 'Localizable.xcstrings')

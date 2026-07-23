@@ -66,10 +66,17 @@ module I18nContextGenerator
     end
 
     def insert_comment_edit(entry_member, children, encoded_comment)
+      separator = children.first&.separator || entry_member.separator
+      if inline_member?(entry_member)
+        insertion_point = entry_member.value_start + 1
+        rendered_comment = "\"comment\"#{separator}#{encoded_comment}"
+        rendered_comment = "#{rendered_comment}," unless children.empty?
+        return [insertion_point, insertion_point, rendered_comment]
+      end
+
       entry_indent = line_indent(entry_member.key_start)
       child_indent = children.empty? ? "#{entry_indent}#{indent_unit}" : line_indent(children.first.key_start)
       child_indent = "#{entry_indent}#{indent_unit}" unless child_indent.match?(/\A\s*\z/)
-      separator = children.first&.separator || entry_member.separator
       rendered_comment = "#{child_indent}\"comment\"#{separator}#{encoded_comment}"
 
       if children.empty?
@@ -81,6 +88,10 @@ module I18nContextGenerator
         insertion_point = entry_member.value_start + 1
         [insertion_point, insertion_point, "#{newline}#{rendered_comment},"]
       end
+    end
+
+    def inline_member?(member)
+      !line_indent(member.key_start).match?(/\A[ \t]*\z/)
     end
 
     def indent_unit
