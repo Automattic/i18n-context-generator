@@ -39,16 +39,20 @@ module I18nContextGenerator
       end
 
       def log(message = '')
+        return if @quiet
+
         log_output.puts(message)
       end
 
       def log_output
-        @config.output_stdout || workflow_stage == 'preview_diff' ? $stderr : $stdout
+        @configured_log_output ||
+          (@config.output_stdout || workflow_stage == 'preview_diff' ? $stderr : $stdout)
       end
 
       def write_patch(patch)
-        $stdout.write(patch)
-        $stdout.write("\n") unless patch.end_with?("\n")
+        output = @patch_output || $stdout
+        output.write(patch)
+        output.write("\n") unless patch.end_with?("\n")
       end
     end
   end

@@ -46,7 +46,6 @@ module I18nContextGenerator
 
       def deliver_results
         if workflow_stage == 'preview_diff'
-          write_configured_output
           preview_changes
         else
           apply_results

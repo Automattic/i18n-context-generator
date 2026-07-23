@@ -6,15 +6,20 @@ module I18nContextGenerator
   module Writers
     # Writes extraction results to a JSON file.
     class JsonWriter
-      def write(results, path, metrics: nil)
-        output = {
+      include ResultSerialization
+
+      def write(results, path, metrics: nil, output: $stdout)
+        document = {
+          schema_version: OUTPUT_SCHEMA_VERSION,
           generated_at: Time.now.iso8601,
           version: I18nContextGenerator::VERSION,
           total: results.size,
           metrics: metrics&.to_h,
-          entries: results.sort_by(&:key).map do |result|
+          entries: results.sort_by { |result| result_sort_key(result) }.map do |result|
             {
               key: result.key,
+              source_file: result.source_file,
+              translation_key: result.translation_key,
               text: result.text,
               context: {
                 description: result.description,
@@ -24,7 +29,10 @@ module I18nContextGenerator
                 confidence: result.confidence,
                 ambiguity_reason: result.ambiguity_reason
               },
-              locations: result.locations,
+              locations: serialize_locations(result.locations),
+              changed_locations: serialize_locations(result.changed_locations),
+              changed_location_groups: serialize_location_groups(result.changed_location_groups),
+              changed_translation_locations: serialize_locations(result.changed_translation_locations),
               status: result.status,
               telemetry: {
                 cache_hit: result.cache_hit,
@@ -38,10 +46,10 @@ module I18nContextGenerator
           end
         }
 
-        rendered = Oj.dump(output, indent: 2, mode: :compat)
+        rendered = Oj.dump(document, indent: 2, mode: :compat)
         if path == '-'
-          $stdout.write(rendered)
-          $stdout.write("\n") unless rendered.end_with?("\n")
+          output.write(rendered)
+          output.write("\n") unless rendered.end_with?("\n")
         else
           File.write(path, rendered)
         end

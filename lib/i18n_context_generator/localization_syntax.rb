@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'android_resource'
+require_relative 'apple_string_literal'
 
 module I18nContextGenerator
   # Registry of localization call/resource syntaxes shared by source search,
@@ -19,7 +20,7 @@ module I18nContextGenerator
       ->(key) { ":\\s*LocalizedStringResource\\s*=\\s*\"#{key}\"" },
       ->(key) { "\"#{key}\"\\.localized" }
     ].freeze
-    SWIFT_STRING_BODY_PATTERN = '(?:\\\\.|[^"\\\\])*'
+    SWIFT_STRING_BODY_PATTERN = AppleStringLiteral::BODY_PATTERN
     private_constant :SWIFT_STRING_BODY_PATTERN
 
     IOS_STATIC_SINGLE_LINE_DISCOVERY_PATTERNS = [

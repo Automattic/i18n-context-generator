@@ -628,7 +628,15 @@ RSpec.describe I18nContextGenerator::Config do
         output_stdout: true
       )
       expect { stdout.validate! }
-        .to raise_error(I18nContextGenerator::Error, /preview_diff cannot use structured stdout/)
+        .to raise_error(I18nContextGenerator::Error, /preview_diff cannot write structured output/)
+
+      file_output = described_class.new(
+        workflow_stage: 'preview_diff',
+        write_back: true,
+        output_path: 'context.json'
+      )
+      expect { file_output.validate! }
+        .to raise_error(I18nContextGenerator::Error, /preview_diff cannot write structured output/)
     end
 
     it 'requires an explicit model and safe endpoint for OpenAI-compatible providers' do

@@ -8,6 +8,22 @@ RSpec.describe I18nContextGenerator::Writers::AndroidXmlWriter do
   end
 
   describe '#write' do
+    it 'does not replace the file when no writable result matches' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, "<resources>\n  <string name=\"app_name\">My App</string>\n</resources>\n")
+        original_inode = File.stat(path).ino
+
+        changed = described_class.new.write(
+          [build_result('other_key', 'Other context')],
+          path
+        )
+
+        expect(changed).to be(false)
+        expect(File.stat(path).ino).to eq(original_inode)
+      end
+    end
+
     it 'preserves the source file permissions' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')

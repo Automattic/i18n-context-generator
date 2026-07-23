@@ -45,11 +45,12 @@ module I18nContextGenerator
         return locations unless metadata[:plural] || metadata[:array]
 
         members_by_location = locations.to_h do |location|
-          line_number = location.rpartition(':').last.to_i
-          member = if metadata[:line_span]&.cover?(line_number)
+          changed_location = ChangedLocation.parse(location)
+          line_number = changed_location.right? ? changed_location.line : changed_location.fallback_line
+          member = if line_number && metadata[:line_span]&.cover?(line_number)
                      entry.key
                    else
-                     android_collection_member_at(location, translation_key_for(entry))
+                     android_collection_member_at(changed_location, translation_key_for(entry))
                    end
           [location, member]
         end
@@ -62,11 +63,11 @@ module I18nContextGenerator
         cache_key = [expected_parent, location]
         return @android_collection_members_by_location[cache_key] if @android_collection_members_by_location&.key?(cache_key)
 
-        match = location.match(/\A(.+):(\d+)\z/)
-        return unless match
+        changed_location = ChangedLocation.parse(location)
+        file = changed_location.file
+        target_line = changed_location.right? ? changed_location.line : changed_location.fallback_line
+        return unless target_line
 
-        file = match[1]
-        target_line = match[2].to_i
         member = scan_android_collection_members(file, target_line, expected_parent) if File.file?(file)
         @android_collection_members_by_location ||= {}
         @android_collection_members_by_location[cache_key] = member

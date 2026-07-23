@@ -87,9 +87,15 @@ RSpec.describe I18nContextGenerator::GitDiff do
           diff = described_class.new(base_ref: 'main')
           changed_lines = diff.changed_lines(['./ios/App'])
           root_changed_lines = diff.changed_lines(['.'])
+          absolute_source_path = File.join(dir, 'ios', 'App')
+          absolute_changed_lines = diff.changed_lines([absolute_source_path])
 
           expect(changed_lines.fetch(path)).to include(4)
           expect(root_changed_lines.fetch(path)).to include(4)
+          expect(absolute_changed_lines.fetch(File.join(absolute_source_path, 'SettingsView.swift'))).to include(4)
+          expect(absolute_changed_lines.keys).not_to include(
+            File.join(absolute_source_path, 'ios', 'App', 'SettingsView.swift')
+          )
         end
       end
     end
@@ -194,6 +200,45 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
           expect(locations).to eq('save.button' => ["#{path}:1"])
         end
+      end
+
+      it 'decodes escaped quotes in changed keys' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~'DIFF'
+          @@ -0,0 +1 @@
+          +"quote\"key" = "Quoted";
+        DIFF
+
+        expect(diff.send(:extract_strings_keys, diff_output)).to eq(Set['quote"key'])
+      end
+
+      it 'retains the left side and a head fallback for a removed translator comment' do
+        diff = described_class.new(base_ref: 'main')
+        path = 'Localizable.strings'
+        base_content = "/* Old context */\n\"save.button\" = \"Save\";\n"
+        head_content = "\"save.button\" = \"Save\";\n"
+        diff_output = <<~DIFF
+          @@ -1,2 +1 @@
+          -/* Old context */
+           "save.button" = "Save";
+        DIFF
+
+        locations = diff.send(
+          :extract_strings_key_locations,
+          diff_output,
+          path,
+          base_content: base_content,
+          head_content: head_content
+        )
+
+        expect(locations.fetch('save.button')).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(
+            file: path,
+            line: 1,
+            side: :left,
+            fallback_line: 1
+          )
+        )
       end
     end
 
@@ -385,6 +430,46 @@ RSpec.describe I18nContextGenerator::GitDiff do
 
         expect(diff.send(:extract_xml_keys, diff_output, '/nonexistent')).to be_empty
       end
+
+      it 'retains the left side and a head fallback for a removed translator comment' do
+        diff = described_class.new(base_ref: 'main')
+        path = 'res/values/strings.xml'
+        base_content = <<~XML
+          <resources>
+            <!-- Old context -->
+            <string name="save_button">Save</string>
+          </resources>
+        XML
+        head_content = <<~XML
+          <resources>
+            <string name="save_button">Save</string>
+          </resources>
+        XML
+        diff_output = <<~DIFF
+          @@ -1,4 +1,3 @@
+           <resources>
+          -  <!-- Old context -->
+             <string name="save_button">Save</string>
+           </resources>
+        DIFF
+
+        locations = diff.send(
+          :extract_xml_key_locations,
+          diff_output,
+          path,
+          base_content: base_content,
+          head_content: head_content
+        )
+
+        expect(locations.fetch('save_button')).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(
+            file: path,
+            line: 2,
+            side: :left,
+            fallback_line: 2
+          )
+        )
+      end
     end
 
     context 'with orphaned item resolution' do
@@ -472,6 +557,40 @@ RSpec.describe I18nContextGenerator::GitDiff do
           expect(keys).to include('first')
           expect(keys).to include('colors')
         end
+      end
+
+      it 'does not leak collection state into a later hunk' do
+        diff = described_class.new(base_ref: 'main')
+        diff_output = <<~DIFF
+          @@ -1,3 +1,4 @@
+           <resources>
+           <plurals name="old">
+          +  <item quantity="one">One</item>
+          @@ -10,2 +11,3 @@
+          +  <string name="new">New</string>
+           </resources>
+        DIFF
+
+        locations = diff.send(
+          :extract_xml_key_locations,
+          diff_output,
+          '/nonexistent.xml'
+        )
+
+        expect(locations.fetch('old')).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(
+            file: '/nonexistent.xml',
+            line: 3,
+            side: :right
+          )
+        )
+        expect(locations.fetch('new')).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(
+            file: '/nonexistent.xml',
+            line: 11,
+            side: :right
+          )
+        )
       end
     end
   end
@@ -594,8 +713,12 @@ RSpec.describe I18nContextGenerator::GitDiff do
         )
 
         expect(locations.keys).to contain_exactly('settings.title', 'profile.title')
-        expect(locations['settings.title']).to contain_exactly("#{path}:5")
-        expect(locations['profile.title']).to contain_exactly("#{path}:16")
+        expect(locations['settings.title']).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(file: path, line: 5, side: :right)
+        )
+        expect(locations['profile.title']).to contain_exactly(
+          I18nContextGenerator::ChangedLocation.new(file: path, line: 16, side: :right)
+        )
       end
     end
 
@@ -649,6 +772,9 @@ RSpec.describe I18nContextGenerator::GitDiff do
         )
 
         expect(locations.keys).to contain_exactly('removed.key')
+        expect(locations.fetch('removed.key')).to all(
+          have_attributes(side: :left, fallback_line: nil)
+        )
       end
     end
 

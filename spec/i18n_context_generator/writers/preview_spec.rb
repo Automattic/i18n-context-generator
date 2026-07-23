@@ -12,11 +12,12 @@ RSpec.describe I18nContextGenerator::Writers::Preview do
       end
 
       expect(patch).to include(
-        "diff --git a/#{path} b/#{path}",
-        "--- a/#{path}",
-        "+++ b/#{path}",
+        'diff --git a/Localizable.strings b/Localizable.strings',
+        '--- a/Localizable.strings',
+        '+++ b/Localizable.strings',
         '+/* Context: Screen title */'
       )
+      expect(patch).not_to include('a//')
       expect(patch).not_to include('i18n-context-preview-')
       expect(File.binread(path)).to eq(original)
     end
@@ -41,8 +42,8 @@ RSpec.describe I18nContextGenerator::Writers::Preview do
       end
 
       expect(patch).to include(
-        "--- a/#{path}",
-        "+++ b/#{path}",
+        '--- a/App.swift',
+        '+++ b/App.swift',
         '--- MARK: old',
         '+++ MARK: new'
       )

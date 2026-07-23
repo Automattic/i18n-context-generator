@@ -45,6 +45,15 @@ steps:
     agents:
       queue: linter
 
+  - label: ":rubygems: Build gem"
+    key: gem-build
+    command: |
+      bundle install
+      bundle exec gem build i18n-context-generator.gemspec
+    plugins:
+      - *docker_plugin :
+          image: *docker_ruby_34_image
+
   #################
   # Push to RubyGems
   #################
@@ -54,6 +63,7 @@ steps:
     depends_on:
      - test
      - rubocop
+     - gem-build
     command: .buildkite/gem-push.sh
     plugins:
       - *docker_plugin :

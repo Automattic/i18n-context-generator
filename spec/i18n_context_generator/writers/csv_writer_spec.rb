@@ -54,6 +54,39 @@ RSpec.describe I18nContextGenerator::Writers::CsvWriter do
     )
 
     expect { described_class.new.write([result], '-') }
-      .to output(/\Akey,text,description.*settings\.title,Settings,Navigation title/m).to_stdout
+      .to output(/\Aschema_version,key,source_file,translation_key.*settings\.title.*Settings,Navigation title/m).to_stdout
+  end
+
+  it 'writes source identity and typed diff locations' do
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, 'context.csv')
+      result = I18nContextGenerator::ContextExtractor::ExtractionResult.new(
+        key: 'settings.title',
+        translation_key: 'settings.title',
+        source_file: 'Localizable.strings',
+        text: 'Settings',
+        description: 'Navigation title',
+        changed_translation_locations: [
+          I18nContextGenerator::ChangedLocation.new(
+            file: 'Localizable.strings',
+            line: 2,
+            side: :left,
+            fallback_line: 1
+          )
+        ]
+      )
+
+      described_class.new.write([result], path)
+      row = CSV.read(path, headers: true).first
+
+      expect(row['schema_version']).to eq('1')
+      expect(row['source_file']).to eq('Localizable.strings')
+      expect(row['translation_key']).to eq('settings.title')
+      expect(Oj.load(row['changed_translation_locations']).first).to include(
+        'file' => 'Localizable.strings',
+        'side' => 'left',
+        'fallback_line' => 1
+      )
+    end
   end
 end

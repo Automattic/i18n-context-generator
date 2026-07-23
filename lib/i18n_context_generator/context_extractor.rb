@@ -22,8 +22,14 @@ module I18nContextGenerator
 
     attr_reader :results, :errors, :metrics
 
-    def initialize(config)
+    def initialize(config, log_output: nil, structured_output: nil, patch_output: nil,
+                   quiet: false, progress: true)
       @config = config
+      @configured_log_output = log_output
+      @structured_output = structured_output
+      @patch_output = patch_output
+      @quiet = quiet
+      @progress_enabled = progress && !quiet
       @results = Concurrent::Array.new
       @errors = Concurrent::Array.new
       @metrics = RunMetrics.from([], provider: @config.provider, model: resolved_model)
@@ -141,28 +147,18 @@ module I18nContextGenerator
     end
 
     def process_entries(entries)
-      # Ensure output is not buffered
-      log_output.sync = true
-
       # Results expose changed source locations even during translation-backed
       # discovery. Resolve the diff once on the caller thread before workers can
       # race to initialize the lazy filter.
       source_line_filter if @config.diff_base
 
-      progress = TTY::ProgressBar.new(
-        '[:bar] :current/:total :percent :eta :key',
-        total: entries.size,
-        width: 30,
-        output: log_output
-      )
+      progress = build_progress(entries.size)
 
       # Use a thread pool for concurrent processing
       pool = Concurrent::FixedThreadPool.new(@config.concurrency)
-      current_key = Concurrent::AtomicReference.new('')
 
       entries.each do |entry|
         pool.post do
-          current_key.set(truncate(entry.key, 40))
           result = process_entry(entry)
           @results << result
           @errors << result if result.error
@@ -181,13 +177,24 @@ module I18nContextGenerator
           @results << result
           @errors << result
         ensure
-          progress.advance(key: current_key.get)
+          progress&.advance(key: truncate(entry.key, 40))
         end
       end
 
       pool.shutdown
       pool.wait_for_termination
-      log # New line after progress bar
+      log if progress # New line after progress bar
+    end
+
+    def build_progress(total)
+      return unless @progress_enabled
+
+      TTY::ProgressBar.new(
+        '[:bar] :current/:total :percent :eta :key',
+        total: total,
+        width: 30,
+        output: log_output
+      )
     end
 
     def process_entry(entry)
@@ -297,7 +304,12 @@ module I18nContextGenerator
                  Writers::CsvWriter.new
                end
 
-      writer.write(@results, @config.output_path, metrics: @metrics)
+      writer.write(
+        @results,
+        @config.output_path,
+        metrics: @metrics,
+        output: @structured_output || $stdout
+      )
     end
 
     def write_back_to_source

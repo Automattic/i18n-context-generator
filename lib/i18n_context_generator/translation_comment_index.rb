@@ -1,19 +1,27 @@
 # frozen_string_literal: true
 
 require_relative 'xml_scanner'
+require_relative 'apple_string_literal'
 
 module I18nContextGenerator
   # Associates translator-comment lines with the translation entry that follows.
   # Diff consumers use this to treat comment-only edits as entry changes while
   # retaining the exact changed comment line for review placement.
   class TranslationCommentIndex
-    def initialize(file_path, format:)
+    def initialize(file_path = nil, format:, content: nil)
       @file_path = file_path
       @format = format
+      @content = content || File.binread(file_path)
+      @key_lines = {}
     end
 
     def key_at(line_number)
       entries[line_number]
+    end
+
+    def line_for_key(key)
+      entries
+      @key_lines[key]
     end
 
     private
@@ -31,7 +39,7 @@ module I18nContextGenerator
       pending_lines = []
       inside_comment = false
 
-      File.foreach(@file_path).with_index(1) do |line, line_number|
+      @content.each_line.with_index(1) do |line, line_number|
         content = line
 
         if inside_comment
@@ -55,6 +63,7 @@ module I18nContextGenerator
         end
 
         if (key = strings_key_from(content))
+          @key_lines[key] ||= line_number
           pending_lines.each { |comment_line| entries[comment_line] = key }
           pending_lines.clear
         elsif !content.strip.empty?
@@ -66,16 +75,17 @@ module I18nContextGenerator
     end
 
     def strings_key_from(content)
-      content[/\A\s*"([^"]+)"\s*=/, 1]
+      AppleStringLiteral.assignment_key(content)
     end
 
     def xml_entries
       entries = {}
       pending_lines = []
       pending_tag = nil
+      pending_tag_line = nil
       comment_state = {}
 
-      File.foreach(@file_path).with_index(1) do |line, line_number|
+      @content.each_line.with_index(1) do |line, line_number|
         visible, contained_comment = XmlScanner.without_comments(line, comment_state)
         pending_lines << line_number if contained_comment
 
@@ -83,6 +93,7 @@ module I18nContextGenerator
           pending_tag << visible
         elsif (tag_start = visible.index(/<(?:string-array|plurals|string)\b/))
           pending_tag = visible[tag_start..]
+          pending_tag_line = line_number
         elsif !visible.strip.empty?
           pending_lines.clear
         end
@@ -90,10 +101,12 @@ module I18nContextGenerator
         next unless pending_tag&.include?('>')
 
         if (key = resource_name_from(pending_tag))
+          @key_lines[key] ||= pending_tag_line
           pending_lines.each { |comment_line| entries[comment_line] = key }
         end
         pending_lines.clear
         pending_tag = nil
+        pending_tag_line = nil
       end
 
       entries

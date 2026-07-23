@@ -201,7 +201,9 @@ The legacy `--translations` and `--keys` flags still accept comma-separated list
 
 - `check`: validate configuration and confirm source usage without calling the LLM
 - `plan`: list selected keys and destinations without calling the LLM
-- `preview-diff`: generate context and print the exact write-back patch to stdout without changing files; diagnostics go to stderr
+- `preview-diff`: generate context and print the exact write-back patch to stdout
+  without changing translation, source, or structured-output files; diagnostics
+  go to stderr
 - `apply`: generate context and write to the configured destinations
 - `extract`: compatibility entry point that uses `workflow.stage` from configuration, defaulting to `apply`
 
@@ -264,7 +266,14 @@ key,text,description,ui_element,tone,max_length,confidence,ambiguity_reason,loca
 settings.title,Settings,Navigation bar title for the main settings screen,navigation,neutral,15,high,,ios/SettingsViewController.swift:17,success,false,1,834,61,0,
 ```
 
-JSON and CSV include per-result confidence, ambiguity, usage locations, token counts, retries, and request count. The Ruby result API additionally retains changed-only and complete evidence locations for review clients. The run summary reports aggregate requests, cache hits, tokens, retries, and an estimated list-price cost when the selected model has known pricing. Cost is informational and does not account for provider-specific discounts or billing adjustments.
+JSON and CSV output schema version 1 includes source-file and translation-key
+identity, complete and changed-only evidence locations, side-aware translation
+diff locations, confidence, ambiguity, token counts, retries, and request count.
+This keeps duplicate keys from different translation files distinguishable. The
+run summary reports aggregate requests, cache hits, tokens, retries, and an
+estimated list-price cost when the selected model has known pricing. Cost is
+informational and does not account for provider-specific discounts or billing
+adjustments.
 
 With `--write-back`, generated context is written back into translation files:
 
@@ -341,7 +350,11 @@ config = I18nContextGenerator::Config.new(
   diff_head: 'danger_head'
 )
 
-extractor = I18nContextGenerator::ContextExtractor.new(config)
+extractor = I18nContextGenerator::ContextExtractor.new(
+  config,
+  quiet: true,
+  progress: false
+)
 extractor.run
 
 extractor.results.each do |result|
@@ -351,11 +364,15 @@ extractor.results.each do |result|
   result.changed_locations              # Source evidence changed inside the configured range
   result.changed_location_groups        # Changed source lines grouped by localization occurrence
   result.translation_key                # Owning translation resource (including Android collections)
-  result.changed_translation_locations  # Exact changed lines for that translation resource
+  # ChangedLocation objects with file, line, side (:left/:right), and an
+  # optional right-side fallback_line for review suggestions.
+  result.changed_translation_locations
 end
 ```
 
 An invalid ref or failed `git diff` raises `I18nContextGenerator::Error`; it is never reported as an unchanged range.
+Programmatic callers may also inject `log_output:`, `structured_output:`, and
+`patch_output:` streams instead of using the process-wide standard streams.
 
 Example GitHub Actions step:
 

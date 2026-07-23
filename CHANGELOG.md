@@ -10,33 +10,15 @@ _None_
 
 ### New Features
 
-- Support Apple string catalogs (`.xcstrings`) and `LocalizedStringResource` usages.
-- Add explicit `check`, `plan`, `preview-diff`, and `apply` workflow stages.
-- Add structured CSV/JSON stdout output and repeatable singular CLI input flags.
-- Report confidence, ambiguity, request counts, cache hits, token usage, retries,
-  and estimated model cost.
-- Add an explicit, credential-isolated OpenAI-compatible provider for local and
-  HTTPS endpoints.
-- Add a versioned configuration schema, `config validate`, and `--print-config`.
+_None_
 
 ### Bug Fixes
 
-- Preserve Android plural and array parent comments as extraction evidence.
-- Map changed Apple string-catalog values and comments back to their owning keys,
-  including removals on diverged base branches.
-- Reject unknown options in explicitly versioned configurations and unknown
-  translation-entry keys instead of silently ignoring client typos.
-- Preserve Apple string-catalog formatting and accept empty placeholder,
-  compact, and mixed-layout entries.
-- Keep preview patches machine-applicable by isolating diagnostics and preserving
-  hunk contents.
-- Preserve failed-request telemetry, custom-endpoint cache identity, literal
-  commas in repeatable flags, and explicit client overrides.
+_None_
 
 ### Internal Changes
 
-- Document why AST extraction and provider batching remain evidence-driven
-  follow-up work.
+_None_
 
 ## 0.5.0
 
@@ -48,6 +30,15 @@ _None_
 
 - Support explicit base and head refs for diff-backed extraction.
 - Expose changed source and translation locations separately from the complete extraction evidence.
+- Support Apple string catalogs (`.xcstrings`) and `LocalizedStringResource` usages.
+- Add explicit `check`, `plan`, `preview-diff`, and `apply` workflow stages.
+- Add versioned structured CSV/JSON output and repeatable singular CLI input flags.
+- Report confidence, ambiguity, request counts, cache hits, token usage, retries,
+  and estimated model cost.
+- Add an explicit, credential-isolated OpenAI-compatible provider for local and
+  HTTPS endpoints.
+- Add a versioned configuration schema, `config validate`, and `--print-config`.
+- Expose side-aware translation diff locations and injectable programmatic I/O.
 
 ### Bug Fixes
 
@@ -59,10 +50,29 @@ _None_
 - Expose machine-readable extraction result status instead of requiring consumers to match placeholder text.
 - Avoid duplicate no-change messages for translation diff runs.
 - Preserve source location occurrence groups so multiline changes produce one integration result per call.
+- Preserve Android plural and array parent comments as extraction evidence.
+- Map changed Apple string-catalog values and comments back to their owning keys,
+  including removals on diverged base branches.
+- Canonicalize absolute source-directory diff paths and decode escaped Apple keys.
+- Preserve removed-side translation changes and reset Android XML state between
+  separate diff hunks.
+- Reject unknown options in explicitly versioned configurations and unknown
+  translation-entry keys instead of silently ignoring client typos.
+- Preserve Apple string-catalog formatting and accept empty placeholder,
+  compact, and mixed-layout entries.
+- Keep preview patches repository-relative and prevent preview workflows from
+  modifying structured-output files.
+- Skip no-op `.strings` and Android XML replacements.
+- Preserve failed-request telemetry, custom-endpoint cache identity, literal
+  commas in repeatable flags, and explicit client overrides.
 
 ### Internal Changes
 
 - Cache Android collection member resolution per changed location during diff filtering.
+- Centralize localization syntax, path/file policies, resource indexing, result
+  serialization, and generated-comment handling.
+- Document why AST extraction and provider batching remain evidence-driven
+  follow-up work.
 
 ## 0.4.0
 

@@ -81,7 +81,7 @@ module I18nContextGenerator
         validate_inclusion(errors, :workflow_stage, @workflow_stage, Schema.values(:workflow_stage))
         validate_inclusion(errors, :platform, @platform, VALID_PLATFORMS) unless @platform.nil?
         errors << 'preview_diff requires write_back or write_back_to_code' if @workflow_stage == 'preview_diff' && !@write_back && !@write_back_to_code
-        errors << 'preview_diff cannot use structured stdout' if @workflow_stage == 'preview_diff' && @output_stdout
+        errors << 'preview_diff cannot write structured output' if @workflow_stage == 'preview_diff' && @output_path
       end
 
       def validate_provider_endpoint(errors)

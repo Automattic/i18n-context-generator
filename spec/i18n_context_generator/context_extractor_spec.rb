@@ -693,7 +693,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       end
     end
 
-    it 'writes configured structured output without contaminating patch stdout' do
+    it 'does not write configured structured output while previewing' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'Localizable.strings')
         output_path = File.join(dir, 'context.csv')
@@ -715,8 +715,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
 
         expect { extractor.send(:deliver_results) }
           .to output(/\Adiff --git.*Settings screen title/m).to_stdout
-          .and output(/Wrote 1 results to #{Regexp.escape(output_path)}/).to_stderr
-        expect(File.read(output_path)).to include('settings.title', 'Settings screen title')
+        expect(File).not_to exist(output_path)
       end
     end
 
@@ -1525,7 +1524,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(writer).to have_received(:write).with(
         extractor.results,
         'out.json',
-        metrics: extractor.metrics
+        metrics: extractor.metrics,
+        output: $stdout
       )
     end
 
@@ -1542,7 +1542,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(writer).to have_received(:write).with(
         extractor.results,
         'out.csv',
-        metrics: extractor.metrics
+        metrics: extractor.metrics,
+        output: $stdout
       )
     end
   end
@@ -1564,6 +1565,34 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect { extractor.send(:deliver_results) }
         .to output(/\A\{.*"settings.title".*\}\n\z/m).to_stdout
         .and output(/Wrote 1 results to stdout/).to_stderr
+    end
+
+    it 'supports injected machine and diagnostic streams' do
+      structured_output = StringIO.new
+      log_output = StringIO.new
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        output_stdout: true,
+        output_format: 'json'
+      )
+      extractor = described_class.new(
+        config,
+        structured_output: structured_output,
+        log_output: log_output,
+        quiet: true,
+        progress: false
+      )
+      extractor.results << described_class::ExtractionResult.new(
+        key: 'settings.title',
+        text: 'Settings',
+        description: 'Settings title'
+      )
+
+      extractor.send(:deliver_results)
+
+      expect(Oj.load(structured_output.string).dig('entries', 0, 'key')).to eq('settings.title')
+      expect(log_output.string).to be_empty
+      expect(extractor.send(:build_progress, 1)).to be_nil
     end
   end
 

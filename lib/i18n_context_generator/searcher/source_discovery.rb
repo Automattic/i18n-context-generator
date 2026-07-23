@@ -225,14 +225,7 @@ module I18nContextGenerator
       end
 
       def unescape_source_string(text)
-        return if text.nil?
-
-        text
-          .gsub('\\"', '"')
-          .gsub("\\'", "'")
-          .gsub('\\\\', '\\')
-          .gsub('\\n', "\n")
-          .gsub('\\t', "\t")
+        AppleStringLiteral.decode(text)
       end
     end
   end

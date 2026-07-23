@@ -43,7 +43,7 @@ module I18nContextGenerator
         end
 
         def sanitize_headers(diff, original_path)
-          display_path = Pathname.new(original_path).cleanpath.to_s
+          display_path = display_path_for(original_path)
           in_hunk = false
           diff.lines.map do |line|
             in_hunk = true if line.start_with?('@@ ')
@@ -57,6 +57,22 @@ module I18nContextGenerator
               line
             end
           end.join
+        end
+
+        def display_path_for(original_path)
+          clean_path = Pathname.new(original_path).cleanpath
+          return clean_path.to_s unless clean_path.absolute?
+
+          directory = File.dirname(clean_path.to_s)
+          stdout, _stderr, status = Open3.capture3('git', 'rev-parse', '--show-toplevel', chdir: directory)
+          if status.success?
+            relative = clean_path.relative_path_from(Pathname.new(stdout.strip)).cleanpath.to_s
+            return relative unless relative == '..' || relative.start_with?('../')
+          end
+
+          clean_path.basename.to_s
+        rescue ArgumentError, SystemCallError
+          clean_path.basename.to_s
         end
       end
     end
