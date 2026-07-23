@@ -195,7 +195,7 @@ Unversioned configuration files use schema version 1 compatibility mode: unknown
 
 Run `bundle exec exe/i18n-context-generator help extract` for the full command reference.
 
-The legacy `--translations` and `--keys` flags still accept comma-separated lists with a deprecation warning. Existing comma-separated path lists are recognized when each path exists. Repeatable singular flags preserve literal commas in paths and key patterns.
+The legacy `--translations` and `--keys` flags still accept comma-separated lists with a deprecation warning. Repeatable singular flags always preserve literal commas in paths and key patterns.
 
 ### Workflow stages
 

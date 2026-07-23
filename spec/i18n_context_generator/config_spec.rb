@@ -330,6 +330,20 @@ RSpec.describe I18nContextGenerator::Config do
       end
     end
 
+    it 'never infers a legacy list from a singular path flag' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          FileUtils.touch(%w[Resources Legacy.xcstrings])
+
+          config = described_class.from_cli(
+            translation: ['Resources,Legacy.xcstrings']
+          )
+
+          expect(config.translations).to eq(['Resources,Legacy.xcstrings'])
+        end
+      end
+    end
+
     it 'parses CLI options' do
       options = {
         translations: 'file1.strings,file2.strings',

@@ -150,11 +150,6 @@ module I18nContextGenerator
     def warn_deprecated_list_options!
       say_error 'Warning: --translations is deprecated; repeat --translation instead.' if options[:translations]
       say_error 'Warning: --keys is deprecated; repeat --key instead.' if options[:keys]
-
-      path_values = Array(options[:translation]) + Array(options[:source])
-      return unless path_values.any? { |value| Config.legacy_path_list_value?(value) }
-
-      say_error 'Warning: comma-separated path lists are deprecated; repeat the singular flag instead.'
     end
 
     def validate_api_key!(provider: nil, dry_run: nil)

@@ -10,9 +10,6 @@ module I18nContextGenerator
           normalized = value.to_s.strip
           normalized unless normalized.empty?
         end
-        repeatable = repeatable.flat_map do |value|
-          legacy_path_list_value?(value) ? split_legacy_list(value) : value
-        end
         (repeatable + split_legacy_list(legacy)).uniq
       end
 
@@ -22,14 +19,6 @@ module I18nContextGenerator
           normalized unless normalized.empty?
         end
         repeatable + split_legacy_list(legacy)
-      end
-
-      def legacy_path_list_value?(value)
-        return false unless value.to_s.include?(',')
-        return false if File.exist?(value)
-
-        paths = split_legacy_list(value)
-        paths.size > 1 && paths.all? { |path| File.exist?(path) }
       end
 
       private

@@ -85,24 +85,19 @@ RSpec.describe I18nContextGenerator::CLI do
       allow(cli).to receive(:say_error)
     end
 
-    it 'warns for legacy plural flags and detected comma-separated path lists' do
-      Dir.mktmpdir do |dir|
-        first = File.join(dir, 'First.strings')
-        second = File.join(dir, 'Second.strings')
-        FileUtils.touch([first, second])
-        allow(cli).to receive(:options).and_return(
-          translations: "#{first},#{second}",
-          keys: 'settings.*,profile.*',
-          source: nil,
-          translation: ["#{first},#{second}"]
-        )
+    it 'warns only for legacy plural flags' do
+      allow(cli).to receive(:options).and_return(
+        translations: 'First.strings,Second.strings',
+        keys: 'settings.*,profile.*',
+        source: ['Sources,Shared'],
+        translation: ['Resources,Legacy.xcstrings']
+      )
 
-        cli.send(:warn_deprecated_list_options!)
+      cli.send(:warn_deprecated_list_options!)
 
-        expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
-        expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
-        expect(cli).to have_received(:say_error).with(/comma-separated path lists are deprecated/)
-      end
+      expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
+      expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
+      expect(cli).to have_received(:say_error).exactly(2).times
     end
   end
 
