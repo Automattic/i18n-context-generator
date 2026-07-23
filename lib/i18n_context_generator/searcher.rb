@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
-require 'find'
 require 'concurrent'
+require_relative 'path_policy'
+require_relative 'file_classifier'
+require_relative 'localization_syntax'
 require_relative 'searcher/comment_masking'
 require_relative 'searcher/match_filtering'
 require_relative 'searcher/source_discovery'
@@ -32,22 +34,14 @@ module I18nContextGenerator
       end
     end
 
-    # File extensions to search by platform
-    FILE_EXTENSIONS = {
-      ios: %w[.swift .m .mm .h].freeze,
-      android: %w[.kt .java .xml].freeze,
-      unknown: %w[.swift .m .mm .h .kt .java .xml].freeze
-    }.freeze
-
-    IOS_WRAPPER_DEFINITION_PATTERN =
-      /\b(static\s+)?(?:let|var)\s+(\w+)\s*=\s*(?:NSLocalizedString|String\s*\(\s*localized:|LocalizedStringKey\s*\(|Text\s*\()/
     IOS_TYPE_DECLARATION_PATTERN = /\b(class|struct|enum|extension)\s+(\w+)/
 
-    def initialize(source_paths:, ignore_patterns:, context_lines: 15, platform: nil)
+    def initialize(source_paths:, ignore_patterns:, context_lines: 15, platform: nil, swift_functions: nil)
       @source_paths = source_paths
-      @ignore_patterns = compile_ignore_patterns(ignore_patterns)
+      @path_policy = PathPolicy.new(ignore_patterns: ignore_patterns, roots: source_paths)
       @context_lines = context_lines
       @platform = platform || detect_platform
+      @localization_syntax = LocalizationSyntax.new(swift_functions: swift_functions)
 
       # Cache discovered files for repeated searches
       @files_cache = nil
@@ -79,45 +73,12 @@ module I18nContextGenerator
 
     def detect_platform
       @source_paths.each do |path|
-        next unless File.exist?(path)
-        next if File.directory?(path) && ignored?(path, directory: true)
-
-        if File.directory?(path)
-          Find.find(path) do |f|
-            if File.directory?(f) && ignored?(f, directory: true)
-              Find.prune
-              next
-            end
-
-            next unless File.file?(f)
-            next if ignored?(f)
-
-            return :ios if f.end_with?('.swift', '.m', '.mm')
-            return :android if f.end_with?('.kt', '.java')
-            return :android if f.end_with?('.xml') && f.split(File::SEPARATOR).include?('res')
-          end
-        elsif !ignored?(path) && path.end_with?('.swift', '.m', '.mm')
-          return :ios
-        elsif !ignored?(path) && path.end_with?('.kt', '.java')
-          return :android
+        @path_policy.each_file(path) do |file|
+          platform = FileClassifier.source_platform(file)
+          return platform if platform
         end
       end
       :unknown
-    end
-
-    def compile_ignore_patterns(patterns)
-      patterns.map { |p| glob_to_regex(p) }
-    end
-
-    def glob_to_regex(glob_pattern)
-      # Convert glob pattern to regex
-      # Handle common glob patterns: *, **, ?
-      regex_str = Regexp.escape(glob_pattern)
-                        .gsub('\*\*/', '(.*/)?')  # **/ matches any path (including empty)
-                        .gsub('\*\*', '.*')       # ** matches anything
-                        .gsub('\*', '[^/]*')      # * matches within path segment
-                        .gsub('\?', '.')          # ? matches single char
-      Regexp.new("(?:^|/)#{regex_str}(?:$|/)")
     end
 
     def discover_files
@@ -126,36 +87,14 @@ module I18nContextGenerator
       @files_cache_mutex.synchronize do
         return @files_cache if @files_cache
 
-        extensions = FILE_EXTENSIONS[@platform] || FILE_EXTENSIONS[:unknown]
-        files = []
-
-        @source_paths.each do |path|
-          if File.file?(path)
-            files << path if extensions.any? { |ext| path.end_with?(ext) }
-          elsif File.directory?(path)
-            next if ignored?(path, directory: true)
-
-            Find.find(path) do |candidate|
-              if File.directory?(candidate)
-                next unless candidate != path && ignored?(candidate, directory: true)
-
-                Find.prune
-              end
-
-              files << candidate if extensions.any? { |extension| candidate.end_with?(extension) }
-            end
-          end
+        @files_cache = @path_policy.files(@source_paths) do |file|
+          FileClassifier.searchable_source?(file, platform: @platform)
         end
-
-        # Apply ignore patterns and cache
-        @files_cache = files.reject { |file| ignored?(file) }.uniq { |file| File.expand_path(file) }
       end
     end
 
     def ignored?(file, directory: false)
-      candidates = [file]
-      candidates << "#{file}/" if directory && !file.end_with?('/')
-      @ignore_patterns.any? { |pattern| candidates.any? { |candidate| pattern.match?(candidate) } }
+      @path_policy.ignored?(file, directory: directory)
     end
 
     def search_file(file, patterns, key, enable_multiline: true)
@@ -173,7 +112,7 @@ module I18nContextGenerator
 
       # For iOS files, also check for multi-line NSLocalizedString patterns
       # where the function call and key are on different lines
-      if enable_multiline && @platform == :ios && file.end_with?('.swift', '.m', '.mm', '.h')
+      if enable_multiline && @platform == :ios && FileClassifier.searchable_platform(file) == :ios
         multiline_matches = find_multiline_ios_matches(searchable_lines, patterns, key)
         match_indices.merge(multiline_matches)
       end
@@ -242,15 +181,15 @@ module I18nContextGenerator
       return unless definition_index
 
       definition_line = lines[definition_index]
-      definition_match = IOS_WRAPPER_DEFINITION_PATTERN.match(definition_line)
-      return unless definition_match&.captures&.first
+      definition_match = @localization_syntax.ios_wrapper_definition_pattern.match(definition_line)
+      return unless definition_match
 
       type_path = find_ios_type_path(lines, definition_index)
       return if type_path.empty?
 
       {
         type_path: type_path,
-        member_name: definition_match[2],
+        member_name: definition_match[:member_name],
         definition_file: match.file,
         definition_line: definition_index + 1
       }
@@ -270,7 +209,7 @@ module I18nContextGenerator
       start_idx = [0, match_index - lookback].max
 
       match_index.downto(start_idx) do |index|
-        return index if IOS_WRAPPER_DEFINITION_PATTERN.match?(lines[index])
+        return index if @localization_syntax.ios_wrapper_definition_pattern.match?(lines[index])
       end
 
       nil
@@ -316,21 +255,23 @@ module I18nContextGenerator
     # e.g., NSLocalizedString(\n    "key",\n    comment: "...")
     def find_multiline_ios_matches(lines, patterns, key)
       key_pattern = /["']#{Regexp.escape(key)}["']/
+      call_patterns = @localization_syntax.ios_multiline_search_patterns(key)
 
       lines.each_with_index.filter_map do |line, index|
         next if patterns.any? { |p| p.match?(line) }  # Already a single-line match
         next unless key_pattern.match?(line)          # Doesn't contain the key
 
-        index if preceded_by_localization_opener?(lines, index)
+        index if preceded_by_localization_call?(lines, index, call_patterns)
       end.to_set
     end
 
-    def preceded_by_localization_opener?(lines, index, lookback: 5)
+    def preceded_by_localization_call?(lines, index, patterns, lookback: 5)
       start_idx = [0, index - lookback].max
 
       (start_idx...index).reverse_each do |i|
         line = lines[i]
-        return true if IOS_FUNCTION_OPENERS.any? { |opener| opener.match?(line) }
+        snippet = lines[i..index].join("\n")
+        return true if patterns.any? { |pattern| pattern.match?(snippet) }
         return false if line =~ /;\s*$/ || line =~ /\)\s*$/ # Hit a statement boundary
       end
 
@@ -360,93 +301,15 @@ module I18nContextGenerator
     end
 
     def build_search_patterns(key, resource_type: nil)
-      pattern_strings = case @platform
-                        when :ios
-                          build_ios_patterns(key)
-                        when :android
-                          build_android_patterns(key, resource_type: resource_type)
-                        else
-                          build_ios_patterns(key) + build_android_patterns(key, resource_type: resource_type) + [Regexp.escape(key)]
-                        end
-
-      # Pre-compile all patterns for this search
-      pattern_strings.map { |p| Regexp.new(p) }
+      @localization_syntax.search_patterns(key, platform: @platform, resource_type: resource_type)
     end
-
-    # Extract the base resource name from composite Android keys
-    # e.g., "post_likes_count:one" -> "post_likes_count"
-    #        "days_of_week[0]"     -> "days_of_week"
-    def android_base_key(key)
-      key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
-    end
-
-    # Patterns that indicate the start of a localization function call
-    # Used for multi-line matching when the key is on a different line
-    IOS_FUNCTION_OPENERS = [
-      /NSLocalizedString\s*\(\s*$/,
-      /String\s*\(\s*localized:\s*$/,
-      /LocalizedStringKey\s*\(\s*$/,
-      /Text\s*\(\s*$/
-    ].freeze
-    private_constant :IOS_FUNCTION_OPENERS
 
     def build_ios_patterns(key)
-      escaped = Regexp.escape(key)
-      [
-        # NSLocalizedString("key", ...) - most common (Swift and Obj-C)
-        # Note: @? handles optional @ prefix for Objective-C @"string" syntax
-        "NSLocalizedString\\s*\\(\\s*@?[\"']#{escaped}[\"']",
-        # String(localized: "key", ...) - modern Swift
-        "String\\s*\\(\\s*localized:\\s*[\"']#{escaped}[\"']",
-        # LocalizedStringKey("key") - SwiftUI
-        "LocalizedStringKey\\s*\\(\\s*[\"']#{escaped}[\"']",
-        # Direct assignment to a LocalizedStringKey-typed value
-        "LocalizedStringKey\\s*=\\s*[\"']#{escaped}[\"']",
-        # Text("key") - SwiftUI (when using localized strings)
-        "Text\\s*\\(\\s*[\"']#{escaped}[\"']",
-        # .localized extension pattern
-        "[\"']#{escaped}[\"']\\.localized"
-      ]
+      @localization_syntax.ios_search_patterns(key)
     end
 
     def build_android_patterns(key, resource_type: nil)
-      base = android_base_key(key)
-      escaped_base = Regexp.escape(base)
-
-      if resource_type.to_s == 'plural' || key =~ /:[a-z]+$/
-        # Plural key (e.g., "post_likes_count:one") — search by base name in plural resources
-        [
-          "R\\.plurals\\.#{escaped_base}\\b",
-          "@plurals/#{escaped_base}\\b",
-          "getQuantityString\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
-          "\\.getQuantityString\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
-          "pluralStringResource\\s*\\(\\s*R\\.plurals\\.#{escaped_base}",
-          "[\\(\\s,=]plurals\\.#{escaped_base}\\b"
-        ]
-      elsif resource_type.to_s == 'array' || key =~ /\[\d+\]$/
-        # Array key (e.g., "days_of_week[0]") — search by base name in array resources
-        [
-          "R\\.array\\.#{escaped_base}\\b",
-          "@array/#{escaped_base}\\b",
-          "getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
-          "\\.getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
-          "resources\\.getStringArray\\s*\\(\\s*R\\.array\\.#{escaped_base}",
-          "[\\(\\s,=]array\\.#{escaped_base}\\b"
-        ]
-      else
-        # Standard string key
-        escaped = Regexp.escape(key)
-        [
-          "R\\.string\\.#{escaped}\\b",
-          "@string/#{escaped}\\b",
-          "getString\\s*\\(\\s*R\\.string\\.#{escaped}",
-          "\\.getString\\s*\\(\\s*R\\.string\\.#{escaped}",
-          "stringResource\\s*\\(\\s*R\\.string\\.#{escaped}",
-          "[\\(\\s,=]string\\.#{escaped}\\b",
-          "getString\\s*\\(\\s*string\\.#{escaped}",
-          "stringResource\\s*\\(\\s*string\\.#{escaped}"
-        ]
-      end
+      @localization_syntax.android_search_patterns(key, resource_type: resource_type)
     end
   end
 end

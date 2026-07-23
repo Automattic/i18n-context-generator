@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../generated_comment'
+require_relative '../localization_syntax'
+
 module I18nContextGenerator
   module Writers
     # Writer that updates comment: parameters in Swift localization calls
@@ -7,20 +10,11 @@ module I18nContextGenerator
     class SwiftWriter
       include Helpers
 
-      SWIFT_STRING_PATTERN = '"(?:\\\\.|[^"\\\\])*"'
       COMMENT_ARGUMENT_PATTERN = /comment:\s*"((?:\\.|[^"\\])*)"/
-      private_constant :SWIFT_STRING_PATTERN, :COMMENT_ARGUMENT_PATTERN
-
-      # Default patterns for Swift localization functions
-      # Each pattern should capture: (prefix)(key)(middle)(comment_value)(suffix)
-      DEFAULT_FUNCTIONS = %w[
-        NSLocalizedString
-        String(localized:
-        Text(
-      ].freeze
+      private_constant :COMMENT_ARGUMENT_PATTERN
 
       def initialize(functions: nil, context_prefix: 'Context: ', context_mode: 'replace')
-        @functions = functions || DEFAULT_FUNCTIONS
+        @localization_syntax = LocalizationSyntax.new(swift_functions: functions)
         @context_prefix = context_prefix
         @context_mode = context_mode
       end
@@ -72,46 +66,17 @@ module I18nContextGenerator
 
       # Update comment for a specific key in the content
       def update_comment_for_key(content, key, description)
-        escaped_key = Regexp.escape(key)
-
-        @functions.each do |func|
-          # Build pattern based on function type
-          pattern = build_pattern_for_function(func, escaped_key)
-          next unless pattern
-
+        @localization_syntax.swift_writer_patterns(key).each do |pattern|
           # Try to match and replace
           content = content.gsub(pattern) do |match|
-            update_match(match, func, key, description)
+            update_match(match, description)
           end
         end
 
         content
       end
 
-      def build_pattern_for_function(func, escaped_key)
-        comment_pattern = "comment:\\s*#{SWIFT_STRING_PATTERN}"
-
-        case func
-        when 'NSLocalizedString'
-          # NSLocalizedString("key", comment: "...")
-          # NSLocalizedString("key", value: "...", comment: "...")
-          # NSLocalizedString("key", tableName: "...", comment: "...")
-          Regexp.new("NSLocalizedString\\(\\s*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
-        when 'String(localized:'
-          # String(localized: "key", comment: "...")
-          Regexp.new("String\\(\\s*localized:\\s*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
-        when 'Text('
-          # Text("key", comment: "...")
-          # Text(LocalizedStringKey("key"), comment: "...")
-          Regexp.new("Text\\([^)]*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
-        else
-          # Custom function - assume pattern like: func("key", ..., comment: "...")
-          escaped_func = Regexp.escape(func)
-          Regexp.new("#{escaped_func}\\([^)]*\"#{escaped_key}\"[^)]*#{comment_pattern}[^)]*\\)", Regexp::MULTILINE)
-        end
-      end
-
-      def update_match(match, _func, _key, new_comment)
+      def update_match(match, new_comment)
         # Replace the comment value while preserving the rest of the call
         match.gsub(COMMENT_ARGUMENT_PATTERN) do |_comment_match|
           existing_comment = unescape_swift_string(Regexp.last_match(1))
@@ -122,16 +87,13 @@ module I18nContextGenerator
 
       def build_final_comment(existing_comment, new_context)
         context_line = "#{@context_prefix}#{new_context}"
-
-        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
-          context_line
-        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
-          # Update existing context line (idempotent)
-          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_line)
-        else
-          # Append context to existing comment
-          "#{existing_comment} #{context_line}"
-        end
+        GeneratedComment.merge(
+          existing: existing_comment,
+          generated: context_line,
+          prefix: @context_prefix,
+          mode: @context_mode,
+          separator: ' '
+        )
       end
 
       def escape_swift_string(str)

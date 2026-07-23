@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../android_resource'
+require_relative '../generated_comment'
+
 module I18nContextGenerator
   module Writers
     # Writer that updates Android strings.xml files with context comments
@@ -76,7 +79,7 @@ module I18nContextGenerator
         results.sort_by(&:key).each do |r|
           next if source_path && !result_matches_source_path?(r, source_path)
 
-          base = r.key.sub(/:[a-z]+$/, '').sub(/\[\d+\]$/, '')
+          base = AndroidResource.base_key(r.key)
           lookup[base] ||= r
           lookup[r.key] ||= r
         end
@@ -84,7 +87,7 @@ module I18nContextGenerator
       end
 
       def insert_context_comment(output_lines, indent, description)
-        context_text = "#{@context_prefix}#{escape_comment(description)}"
+        context_text = escape_comment("#{@context_prefix}#{description}")
 
         if output_lines.any? && output_lines.last.match?(/^\s*<!--.*-->\s*$/)
           existing_match = output_lines.last.match(/^\s*<!--\s*(.*?)\s*-->\s*$/)
@@ -109,19 +112,17 @@ module I18nContextGenerator
       # so we always treat the preceding comment as replaceable — the user accepted
       # this trade-off by choosing an empty prefix.
       def managed_comment?(comment)
-        @context_prefix.empty? || comment.include?(@context_prefix)
+        GeneratedComment.managed?(comment, prefix: escaped_context_prefix)
       end
 
       def build_comment(existing_comment, context_text)
-        if existing_comment.nil? || existing_comment.empty? || @context_mode == 'replace'
-          context_text
-        elsif !@context_prefix.empty? && existing_comment.include?(@context_prefix)
-          # Replace existing context line (idempotent update)
-          existing_comment.gsub(/#{Regexp.escape(@context_prefix)}[^\n]*/, context_text)
-        else
-          # Append context to existing comment
-          "#{existing_comment} #{context_text}"
-        end
+        GeneratedComment.merge(
+          existing: existing_comment,
+          generated: context_text,
+          prefix: escaped_context_prefix,
+          mode: @context_mode,
+          separator: ' '
+        )
       end
 
       def escape_comment(text)
@@ -130,6 +131,10 @@ module I18nContextGenerator
           .gsub('--', '- -') # Double dash not allowed in XML comments
           .gsub("\n", ' ')
           .strip
+      end
+
+      def escaped_context_prefix
+        escape_comment(@context_prefix)
       end
     end
   end

@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../file_classifier'
+
 module I18nContextGenerator
   class Config
     # Validates the fully resolved configuration before extraction starts.
@@ -180,11 +182,7 @@ module I18nContextGenerator
       end
 
       def supported_translation_write_back?(path)
-        extension = File.extname(path).downcase
-        return true if extension == '.strings'
-
-        basename = File.basename(path).downcase
-        extension == '.xml' && (basename == 'strings.xml' || path.include?('/res/values'))
+        !FileClassifier.translation_platform(path).nil?
       end
     end
   end

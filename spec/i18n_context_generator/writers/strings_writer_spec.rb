@@ -95,6 +95,20 @@ RSpec.describe I18nContextGenerator::Writers::StringsWriter do
       end
     end
 
+    it 'uses the escaped prefix to update append-mode comments idempotently' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        File.write(path, "/* Manual context */\n\"title\" = \"Title\";\n")
+        writer = described_class.new(context_prefix: '*/ Context: ', context_mode: 'append')
+        result = build_result('title', 'Screen title')
+
+        writer.write([result], path)
+        writer.write([result], path)
+
+        expect(File.read(path).scan('* / Context: Screen title').size).to eq(1)
+      end
+    end
+
     it 'skips placeholder descriptions and leaves comments unchanged' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'Localizable.strings')

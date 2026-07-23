@@ -373,6 +373,19 @@ RSpec.describe I18nContextGenerator::Writers::AndroidXmlWriter do
         expect(output).to include('- -')
       end
     end
+
+    it 'escapes an unsafe configured prefix as part of the complete comment' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, "<resources>\n  <string name=\"title\">Title</string>\n</resources>\n")
+
+        writer = described_class.new(context_prefix: '-- Context: ')
+        writer.write([build_result('title', 'Screen title')], path)
+        writer.write([build_result('title', 'Screen title')], path)
+
+        expect(File.read(path).scan('<!-- - - Context: Screen title -->').size).to eq(1)
+      end
+    end
   end
 
   describe 'build_results_lookup' do

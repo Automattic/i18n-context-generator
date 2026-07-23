@@ -8,6 +8,68 @@ RSpec.describe I18nContextGenerator::Writers::SwiftWriter do
   end
 
   describe '#update_file' do
+    it 'updates a configured custom localization function' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Custom.swift')
+        File.write(path, 'let title = MyLocalizedString("custom.title", comment: "Old")')
+        writer = described_class.new(functions: ['MyLocalizedString('])
+
+        writer.update_file(path, 'custom.title' => build_result('custom.title', 'Custom screen title'))
+
+        expect(File.read(path)).to include('comment: "Context: Custom screen title"')
+      end
+    end
+
+    it 'updates a labeled key argument in a configured custom function' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Custom.swift')
+        File.write(path, 'let title = MyLocalizedString(key: "custom.title", comment: "Old")')
+        writer = described_class.new(functions: ['MyLocalizedString'])
+
+        writer.update_file(path, 'custom.title' => build_result('custom.title', 'Custom screen title'))
+
+        expect(File.read(path)).to include('comment: "Context: Custom screen title"')
+      end
+    end
+
+    it 'does not use a later string argument as the localization key' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localized.swift')
+        original = 'String(localized: "title.key", defaultValue: "fallback.key", comment: "Old")'
+        File.write(path, original)
+        writer = described_class.new
+
+        changed = writer.update_file(
+          path,
+          'fallback.key' => build_result('fallback.key', 'Fallback description')
+        )
+
+        expect(changed).to be false
+        expect(File.read(path)).to eq(original)
+      end
+    end
+
+    it 'updates nested LocalizedStringKey calls in Text without matching later arguments' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'NestedText.swift')
+        File.write(
+          path,
+          'Text(LocalizedStringKey("title.key"), fallback: "fallback.key", comment: "Old")'
+        )
+        writer = described_class.new
+
+        writer.update_file(
+          path,
+          'fallback.key' => build_result('fallback.key', 'Wrong'),
+          'title.key' => build_result('title.key', 'Screen title')
+        )
+
+        output = File.read(path)
+        expect(output).to include('comment: "Context: Screen title"')
+        expect(output).not_to include('Context: Wrong')
+      end
+    end
+
     it 'preserves the source file permissions' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'View.swift')

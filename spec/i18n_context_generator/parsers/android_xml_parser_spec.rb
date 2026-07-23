@@ -61,6 +61,34 @@ RSpec.describe I18nContextGenerator::Parsers::AndroidXmlParser do
       end
     end
 
+    it 'exposes exact entry line spans in metadata' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'strings.xml')
+        File.write(path, <<~XML)
+          <resources>
+            <string
+              name="title">Title</string>
+            <plurals name="items">
+              <item
+                quantity="one">One item</item>
+            </plurals>
+          </resources>
+        XML
+
+        entries = parser.parse(path)
+
+        expect(entries.find { |entry| entry.key == 'title' }.metadata).to include(
+          resource_type: :string,
+          line_span: (2..3)
+        )
+        expect(entries.find { |entry| entry.key == 'items:one' }.metadata).to include(
+          resource_type: :plural,
+          line_span: (5..6)
+        )
+        expect(entries.flat_map { |entry| entry.metadata.keys }).not_to include(:resource_line_span)
+      end
+    end
+
     it 'wraps malformed XML in an actionable error' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'strings.xml')

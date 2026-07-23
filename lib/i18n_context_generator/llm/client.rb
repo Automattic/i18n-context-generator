@@ -7,6 +7,7 @@ require 'socket'
 require 'time'
 require 'timeout'
 require_relative 'request_policy'
+require_relative '../file_classifier'
 
 module I18nContextGenerator
   module LLM
@@ -64,8 +65,6 @@ module I18nContextGenerator
           Anthropic
         when 'openai'
           OpenAI
-        when 'ollama'
-          raise Error, 'Ollama provider not yet implemented'
         else
           raise Error, "Unknown LLM provider: #{provider}"
         end
@@ -108,11 +107,11 @@ module I18nContextGenerator
       def detect_platform(matches)
         return 'mobile' if matches.empty?
 
-        extensions = matches.map { |m| File.extname(m.file).downcase }
+        platforms = matches.filter_map { |match| FileClassifier.searchable_platform(match.file) }
 
-        if extensions.any? { |e| ['.swift', '.m', '.mm'].include?(e) }
+        if platforms.include?(:ios)
           'iOS'
-        elsif extensions.any? { |e| ['.kt', '.java'].include?(e) }
+        elsif platforms.include?(:android)
           'Android'
         else
           'mobile'

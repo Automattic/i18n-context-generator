@@ -80,6 +80,22 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
+
+        it 'does not treat a plain multiline String initializer as localization' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'PlainString.swift')
+            File.write(file, <<~SWIFT)
+              let value = String(
+                "not.localization"
+              )
+            SWIFT
+            plain_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(plain_searcher.search('not.localization')).to be_empty
+          end
+        end
       end
 
       context 'with LocalizedStringKey pattern' do
@@ -102,6 +118,28 @@ RSpec.describe I18nContextGenerator::Searcher do
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('SwiftUIExamples.swift') }).to be true
         end
+
+        it 'follows static LocalizedStringKey wrapper constants to their usage' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'LocalizedWrapper.swift')
+            File.write(file, <<~SWIFT)
+              enum Copy {
+                static let title = LocalizedStringKey("wrapped.title")
+              }
+              Text(Copy.title)
+            SWIFT
+            wrapper_searcher = described_class.new(source_paths: [dir], ignore_patterns: [], platform: :ios)
+
+            expect(wrapper_searcher.search('wrapped.title').map(&:line)).to contain_exactly(2, 4)
+          end
+        end
+
+        it 'does not classify instance properties as type-qualified wrapper constants' do
+          pattern = I18nContextGenerator::LocalizationSyntax.new.ios_wrapper_definition_pattern
+
+          expect(pattern).to match('static let title = LocalizedStringKey("wrapped.title")')
+          expect(pattern).not_to match('let title = LocalizedStringKey("instance.title")')
+        end
       end
 
       context 'with Text() pattern' do
@@ -110,6 +148,19 @@ RSpec.describe I18nContextGenerator::Searcher do
 
           expect(matches).not_to be_empty
           expect(matches.any? { |m| m.file.end_with?('QuickStartView.swift') }).to be true
+        end
+
+        it 'does not treat Text(verbatim:) as localization' do
+          Dir.mktmpdir do |dir|
+            file = File.join(dir, 'VerbatimText.swift')
+            File.write(file, 'Text(verbatim: "not.localization")')
+            verbatim_searcher = described_class.new(
+              source_paths: [dir], ignore_patterns: [], platform: :ios
+            )
+
+            expect(verbatim_searcher.search('not.localization')).to be_empty
+            expect(verbatim_searcher.discover_localization_entries).to be_empty
+          end
         end
       end
 
@@ -240,6 +291,63 @@ RSpec.describe I18nContextGenerator::Searcher do
     end
 
     describe '#discover_localization_entries' do
+      it 'uses configured custom Swift functions for search and source discovery' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'CustomLocalization.swift')
+          File.write(file, 'let title = MyLocalizedString("custom.title", comment: "Custom screen title")')
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString(']
+          )
+
+          expect(custom_searcher.search('custom.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(key: 'custom.title', comment: 'Custom screen title')
+          )
+        end
+      end
+
+      it 'accepts a label before the first string argument of a custom function' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'LabeledCustomLocalization.swift')
+          File.write(file, 'let title = MyLocalizedString(key: "custom.title", comment: "Custom title")')
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString']
+          )
+
+          expect(custom_searcher.search('custom.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries).to include(
+            have_attributes(key: 'custom.title', comment: 'Custom title')
+          )
+        end
+      end
+
+      it 'retains built-in search and discovery when a custom function is configured' do
+        Dir.mktmpdir do |dir|
+          file = File.join(dir, 'DefaultAndCustomLocalization.swift')
+          File.write(file, <<~SWIFT)
+            Text("default.title", comment: "Default title")
+            MyLocalizedString("custom.title", comment: "Custom title")
+          SWIFT
+          custom_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: [],
+            platform: :ios,
+            swift_functions: ['MyLocalizedString']
+          )
+
+          expect(custom_searcher.search('default.title').map(&:file)).to eq([file])
+          expect(custom_searcher.discover_localization_entries.map(&:key)).to contain_exactly(
+            'default.title', 'custom.title'
+          )
+        end
+      end
+
       it 'discovers localized keys and comments directly from source files' do
         entries = searcher.discover_localization_entries
 
@@ -507,6 +615,22 @@ RSpec.describe I18nContextGenerator::Searcher do
               have_attributes(key: 'relative_res_title', file: 'res/layout/screen.xml')
             )
           end
+        end
+      end
+
+      it 'discovers references from the Android manifest when the platform is known' do
+        Dir.mktmpdir do |dir|
+          manifest = File.join(dir, 'AndroidManifest.xml')
+          File.write(manifest, '<application android:label="@string/application_name" />')
+          manifest_searcher = described_class.new(
+            source_paths: [dir],
+            ignore_patterns: []
+          )
+
+          expect(manifest_searcher.search('application_name').map(&:file)).to eq([manifest])
+          expect(manifest_searcher.discover_localization_entries).to contain_exactly(
+            have_attributes(key: 'application_name', file: manifest)
+          )
         end
       end
 
