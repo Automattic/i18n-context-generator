@@ -5,6 +5,7 @@ require_relative 'config/schema'
 require_relative 'config/validation'
 require_relative 'config/serialization'
 require_relative 'config/defaults'
+require_relative 'config/cli_values'
 
 module I18nContextGenerator
   # Holds all configuration for an extraction run, loaded from YAML config files and/or CLI options.
@@ -12,6 +13,7 @@ module I18nContextGenerator
     include Validation
     include Serialization
     extend Defaults
+    extend CliValues
 
     attr_reader :translations, :source_paths, :source_line_filter, :ignore_patterns,
                 :provider, :model, :concurrency, :context_lines,
@@ -148,10 +150,10 @@ module I18nContextGenerator
     end
 
     def self.from_cli(options)
-      translations = cli_list(options[:translation], options[:translations])
-      source_paths = cli_list(options[:source])
+      translations = cli_path_list(options[:translation], legacy: options[:translations])
+      source_paths = cli_path_list(options[:source])
       source_paths = Schema.default(:source_paths) if source_paths.empty?
-      key_filters = cli_list(options[:key], options[:keys])
+      key_filters = cli_key_filters(options[:key], legacy: options[:keys])
 
       attrs = {
         schema_version: Schema::VERSION,
@@ -171,7 +173,7 @@ module I18nContextGenerator
         dry_run: options[:dry_run] || Schema.default(:dry_run),
         print_config: options[:print_config],
         workflow_stage: options[:workflow_stage] || Schema.default(:workflow_stage),
-        key_filter: key_filters.empty? ? nil : key_filters.join(','),
+        key_filter: key_filters.empty? ? nil : key_filters,
         write_back: options[:write_back] || Schema.default(:write_back),
         write_back_to_code: options[:write_back_to_code] || Schema.default(:write_back_to_code),
         diff_base: options[:diff_base],
@@ -197,15 +199,15 @@ module I18nContextGenerator
     # Thor options without defaults are nil when not passed, so this
     # correctly preserves config-file values for unspecified flags.
     def merge_cli(options)
-      translations = self.class.cli_list(options[:translation], options[:translations])
+      translations = self.class.cli_path_list(options[:translation], legacy: options[:translations])
       if translations.any?
         @translations = deduplicate_paths(translations)
         @translation_locales = {}
       end
-      source_paths = self.class.cli_list(options[:source])
+      source_paths = self.class.cli_path_list(options[:source])
       @source_paths = deduplicate_source_paths(source_paths) if source_paths.any?
-      key_filters = self.class.cli_list(options[:key], options[:keys])
-      @key_filter = key_filters.join(',') if key_filters.any?
+      key_filters = self.class.cli_key_filters(options[:key], legacy: options[:keys])
+      @key_filter = key_filters if key_filters.any?
       merge_cli_provider_and_model(options)
       merge_cli_output(options)
       merge_cli_scalar_options(options)
@@ -215,13 +217,6 @@ module I18nContextGenerator
 
     def self.parse_translations(translations)
       parse_translation_settings(translations)[:paths]
-    end
-
-    def self.cli_list(*values)
-      values.compact.flatten
-            .flat_map { |value| value.to_s.split(',') }
-            .map(&:strip)
-            .reject(&:empty?)
     end
 
     def self.parse_translation_settings(translations, path: nil)
@@ -285,7 +280,8 @@ module I18nContextGenerator
       }
     end
 
-    private_class_method :valid_nonempty_string?, :conflicting_locale?, :config_section, :cache_cli_attributes
+    private_class_method :valid_nonempty_string?, :conflicting_locale?, :config_section,
+                         :cache_cli_attributes
 
     private
 
@@ -349,9 +345,10 @@ module I18nContextGenerator
         @output_destination_conflict = options[:stdout] == true && !output_is_stdout
         @output_path = options[:output]
         @output_stdout = output_is_stdout
-      elsif options[:stdout]
-        @output_path = '-'
-        @output_stdout = true
+      elsif !options[:stdout].nil?
+        @output_stdout = options[:stdout]
+        @output_path = options[:stdout] ? '-' : nil
+        @output_destination_conflict = false
       end
       if options[:format]
         @output_format = normalize_enum_value(options[:format])

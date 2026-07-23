@@ -46,6 +46,7 @@ module I18nContextGenerator
 
       def deliver_results
         if workflow_stage == 'preview_diff'
+          write_configured_output
           preview_changes
         else
           apply_results
@@ -53,12 +54,16 @@ module I18nContextGenerator
       end
 
       def apply_results
-        if @config.output_path
-          write_output
-          log "\nWrote #{@results.size} results to #{@config.output_stdout ? 'stdout' : @config.output_path}"
-        end
+        write_configured_output
         write_back_to_source if @config.write_back
         write_back_to_code if @config.write_back_to_code
+      end
+
+      def write_configured_output
+        return unless @config.output_path
+
+        write_output
+        log "\nWrote #{@results.size} results to #{@config.output_stdout ? 'stdout' : @config.output_path}"
       end
 
       def preview_changes
@@ -80,24 +85,28 @@ module I18nContextGenerator
             end
             writer.write(candidate_results, candidate_path)
           end
-          log patch if patch
+          write_patch(patch) if patch
         end
       end
 
       def preview_code_changes
-        swift_writer = Writers::SwiftWriter.new(
-          functions: @config.swift_functions,
-          context_prefix: @config.context_prefix,
-          context_mode: @config.context_mode
-        )
         results_by_key = build_results_by_key_for_code_write_back
+        return if results_by_key.empty?
 
         swift_files_for_write_back.each do |swift_file|
           patch = Writers::Preview.render(swift_file) do |candidate_path|
             swift_writer.update_file(candidate_path, results_by_key)
           end
-          log patch if patch
+          write_patch(patch) if patch
         end
+      end
+
+      def swift_writer
+        @swift_writer ||= Writers::SwiftWriter.new(
+          functions: @config.swift_functions,
+          context_prefix: @config.context_prefix,
+          context_mode: @config.context_mode
+        )
       end
 
       def swift_files_for_write_back

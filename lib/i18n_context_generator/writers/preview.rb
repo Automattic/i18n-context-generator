@@ -44,13 +44,14 @@ module I18nContextGenerator
 
         def sanitize_headers(diff, original_path)
           display_path = Pathname.new(original_path).cleanpath.to_s
+          in_hunk = false
           diff.lines.map do |line|
-            case line
-            when /\Adiff --git /
+            in_hunk = true if line.start_with?('@@ ')
+            if !in_hunk && line.start_with?('diff --git ')
               "diff --git a/#{display_path} b/#{display_path}\n"
-            when /\A--- /
+            elsif !in_hunk && line.start_with?('--- ')
               "--- a/#{display_path}\n"
-            when /\A\+\+\+ /
+            elsif !in_hunk && line.start_with?('+++ ')
               "+++ b/#{display_path}\n"
             else
               line

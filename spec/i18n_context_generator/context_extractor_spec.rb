@@ -65,6 +65,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         build_entry('settings.save', 'Save'),
         build_entry('profile.name', 'Name'),
         build_entry('profile.email', 'Email'),
+        build_entry('greeting,formal', 'Formal greeting'),
         build_entry('[special]', 'Special')
       ]
     end
@@ -96,6 +97,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       result = extractor.send(:filter_entries, entries)
 
       expect(result.map(&:key)).to contain_exactly('settings.title', 'profile.name')
+    end
+
+    it 'preserves commas inside repeatable key patterns' do
+      extractor = build_extractor(key_filter: ['greeting,formal'])
+      result = extractor.send(:filter_entries, entries)
+
+      expect(result.map(&:key)).to eq(['greeting,formal'])
     end
 
     it 'escapes regex metacharacters instead of treating them as character classes' do
@@ -684,6 +692,46 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         expect(File.binread(path)).to eq(original)
       end
     end
+
+    it 'writes configured structured output without contaminating patch stdout' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'Localizable.strings')
+        output_path = File.join(dir, 'context.csv')
+        File.write(path, "\"settings.title\" = \"Settings\";\n")
+        config = I18nContextGenerator::Config.new(
+          translations: [path],
+          source_paths: [dir],
+          workflow_stage: 'preview_diff',
+          write_back: true,
+          output_path: output_path
+        )
+        extractor = described_class.new(config)
+        extractor.results << described_class::ExtractionResult.new(
+          key: 'settings.title',
+          text: 'Settings',
+          description: 'Settings screen title',
+          source_file: path
+        )
+
+        expect { extractor.send(:deliver_results) }
+          .to output(/\Adiff --git.*Settings screen title/m).to_stdout
+          .and output(/Wrote 1 results to #{Regexp.escape(output_path)}/).to_stderr
+        expect(File.read(output_path)).to include('settings.title', 'Settings screen title')
+      end
+    end
+
+    it 'sends preview diagnostics and metrics to stderr' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'preview_diff',
+        write_back_to_code: true
+      )
+      extractor = described_class.new(config)
+
+      expect { extractor.send(:log, 'Requests: 3, retries: 2') }
+        .to output('').to_stdout
+        .and output(/Requests: 3, retries: 2/).to_stderr
+    end
   end
 
   describe '#load_source_entries' do
@@ -1146,8 +1194,13 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       expect(result.locations).to eq(['/tmp/FirstSettingsView.swift:8', '/tmp/SettingsView.swift:14'])
     end
 
-    it 'includes source discovery locations and the resolved default model in cache identity' do
-      config = I18nContextGenerator::Config.new(translations: [], provider: 'openai')
+    it 'includes source discovery, resolved model, and custom endpoint in cache identity' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        provider: 'openai_compatible',
+        model: 'local-model',
+        endpoint: 'http://127.0.0.1:11434/v1/responses'
+      )
       extractor = described_class.new(config)
       source_entry = build_entry(
         'settings.title',
@@ -1164,7 +1217,7 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
         cache_context = context
         nil
       end
-      llm = instance_double(I18nContextGenerator::LLM::OpenAI)
+      llm = instance_double(I18nContextGenerator::LLM::OpenAICompatible)
       allow(llm).to receive(:generate_context).and_return(
         I18nContextGenerator::LLM::ContextResult.new(description: 'Settings title')
       )
@@ -1173,7 +1226,8 @@ RSpec.describe I18nContextGenerator::ContextExtractor do
       extractor.send(:process_entry, source_entry)
       identity = JSON.parse(cache_context)
 
-      expect(identity['resolved_model']).to eq(I18nContextGenerator::LLM::OpenAI::DEFAULT_MODEL)
+      expect(identity['resolved_model']).to eq('local-model')
+      expect(identity['endpoint']).to eq('http://127.0.0.1:11434/v1/responses')
       expect(identity.dig('source_discovery', 'source_location')).to eq('/tmp/SettingsView.swift:14')
       expect(identity.dig('source_discovery', 'source_locations')).to eq(['/tmp/SettingsView.swift:14'])
     end

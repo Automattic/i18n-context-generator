@@ -85,18 +85,24 @@ RSpec.describe I18nContextGenerator::CLI do
       allow(cli).to receive(:say_error)
     end
 
-    it 'warns for legacy plural flags and comma-separated repeatable values' do
-      allow(cli).to receive(:options).and_return(
-        translations: 'One.strings,Two.strings',
-        keys: 'settings.*,profile.*',
-        source: ['Sources,Shared']
-      )
+    it 'warns for legacy plural flags and detected comma-separated path lists' do
+      Dir.mktmpdir do |dir|
+        first = File.join(dir, 'First.strings')
+        second = File.join(dir, 'Second.strings')
+        FileUtils.touch([first, second])
+        allow(cli).to receive(:options).and_return(
+          translations: "#{first},#{second}",
+          keys: 'settings.*,profile.*',
+          source: nil,
+          translation: ["#{first},#{second}"]
+        )
 
-      cli.send(:warn_deprecated_list_options!)
+        cli.send(:warn_deprecated_list_options!)
 
-      expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
-      expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
-      expect(cli).to have_received(:say_error).with(/comma-separated CLI lists are deprecated/)
+        expect(cli).to have_received(:say_error).with(/--translations is deprecated/)
+        expect(cli).to have_received(:say_error).with(/--keys is deprecated/)
+        expect(cli).to have_received(:say_error).with(/comma-separated path lists are deprecated/)
+      end
     end
   end
 
@@ -197,6 +203,10 @@ RSpec.describe I18nContextGenerator::CLI do
   end
 
   describe I18nContextGenerator::ConfigCommand do
+    it 'uses non-zero exit status for Thor command failures' do
+      expect(described_class.exit_on_failure?).to be(true)
+    end
+
     it 'validates a schema-versioned configuration file' do
       Dir.mktmpdir do |dir|
         path = File.join(dir, 'config.yml')
@@ -223,6 +233,47 @@ RSpec.describe I18nContextGenerator::CLI do
 
   describe '#extract' do
     let(:cli) { described_class.allocate }
+
+    it 'honors a workflow stage loaded from configuration' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'check',
+        output_path: 'context.csv'
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+      allow(cli).to receive(:options).and_return(
+        config: '.i18n-context-generator.yml',
+        translation: nil,
+        translations: nil,
+        diff_base: nil
+      )
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      expect { cli.extract }.not_to raise_error
+      expect(config.workflow_stage).to eq('check')
+    end
+
+    it 'lets an explicit workflow command override the configured stage' do
+      config = I18nContextGenerator::Config.new(
+        translations: [],
+        workflow_stage: 'check',
+        output_path: 'context.csv'
+      )
+      extractor = instance_double(I18nContextGenerator::ContextExtractor, run: nil, errors: [])
+      allow(cli).to receive(:options).and_return(
+        config: '.i18n-context-generator.yml',
+        translation: nil,
+        translations: nil,
+        diff_base: nil
+      )
+      allow(cli).to receive(:validate_api_key!)
+      allow(I18nContextGenerator::Config).to receive(:load).with(cli.options).and_return(config)
+      allow(I18nContextGenerator::ContextExtractor).to receive(:new).with(config).and_return(extractor)
+
+      expect { cli.apply }.not_to raise_error
+      expect(config.workflow_stage).to eq('apply')
+    end
 
     it 'uses the provider from the loaded config when validating API keys' do
       Dir.mktmpdir do |dir|

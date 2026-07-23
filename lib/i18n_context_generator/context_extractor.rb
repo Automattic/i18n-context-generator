@@ -97,7 +97,12 @@ module I18nContextGenerator
     end
 
     def filter_entries(entries)
-      patterns = @config.key_filter.split(',').map do |pattern|
+      configured_patterns = if @config.key_filter.is_a?(Array)
+                              @config.key_filter
+                            else
+                              @config.key_filter.split(',')
+                            end
+      patterns = configured_patterns.map do |pattern|
         escaped = Regexp.escape(pattern.strip).gsub('\*', '.*')
         Regexp.new("^#{escaped}$")
       end
@@ -305,20 +310,15 @@ module I18nContextGenerator
         relevant_results = @results.select { |result| result_matches_source_path?(result, path) }
         next if relevant_results.empty?
 
-        writer.write(relevant_results, path)
-        log "Updated #{path} with context comments"
+        updated = writer.write(relevant_results, path)
+        log "Updated #{path} with context comments" if updated
       end
     end
 
     def write_back_to_code
-      swift_writer = Writers::SwiftWriter.new(
-        functions: @config.swift_functions,
-        context_prefix: @config.context_prefix,
-        context_mode: @config.context_mode
-      )
-
       updated_count = 0
       results_by_key = build_results_by_key_for_code_write_back
+      return if results_by_key.empty?
 
       swift_files_for_write_back.each do |swift_file|
         if swift_writer.update_file(swift_file, results_by_key)

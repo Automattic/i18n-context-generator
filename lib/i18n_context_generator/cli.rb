@@ -6,6 +6,10 @@ require_relative 'config'
 module I18nContextGenerator
   # Configuration inspection commands kept separate from extraction options.
   class ConfigCommand < Thor
+    def self.exit_on_failure?
+      true
+    end
+
     desc 'validate [PATH]', 'Validate a client configuration file'
     def validate(path = '.i18n-context-generator.yml')
       Config.from_file(path).validate!
@@ -56,7 +60,7 @@ module I18nContextGenerator
     extraction_options
 
     def extract
-      run_workflow('apply')
+      run_workflow(nil)
     end
 
     desc 'check', 'Validate and check source usage without calling the LLM'
@@ -112,7 +116,7 @@ module I18nContextGenerator
       validate_options!
       warn_deprecated_list_options!
       config = Config.load(options)
-      config.merge_cli(workflow_stage: stage)
+      config.merge_cli(workflow_stage: stage) if stage
       config.validate!
       if config.print_config
         puts YAML.dump(config.to_h)
@@ -147,10 +151,10 @@ module I18nContextGenerator
       say_error 'Warning: --translations is deprecated; repeat --translation instead.' if options[:translations]
       say_error 'Warning: --keys is deprecated; repeat --key instead.' if options[:keys]
 
-      repeatable_values = Array(options[:translation]) + Array(options[:source]) + Array(options[:key])
-      return unless repeatable_values.any? { |value| value.include?(',') }
+      path_values = Array(options[:translation]) + Array(options[:source])
+      return unless path_values.any? { |value| Config.legacy_path_list_value?(value) }
 
-      say_error 'Warning: comma-separated CLI lists are deprecated; repeat the singular flag instead.'
+      say_error 'Warning: comma-separated path lists are deprecated; repeat the singular flag instead.'
     end
 
     def validate_api_key!(provider: nil, dry_run: nil)

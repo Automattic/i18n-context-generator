@@ -12,7 +12,7 @@ module I18nContextGenerator
         include_translation_comments redact_prompts output_stdout print_config
       ].freeze
       OPTIONAL_STRING_OPTIONS = %i[
-        model endpoint output_path key_filter diff_base diff_head start_key end_key platform
+        model endpoint output_path diff_base diff_head start_key end_key platform
       ].freeze
       TRANSLATION_DIFF_EXTENSIONS = %w[.strings .xcstrings .xml].freeze
 
@@ -40,6 +40,8 @@ module I18nContextGenerator
         validate_string_array(errors, :source_paths, @source_paths, allow_empty: false)
         validate_string_array(errors, :ignore_patterns, @ignore_patterns)
         validate_string_array(errors, :swift_functions, @swift_functions)
+        errors << 'key_filter must be a non-empty string or an array of non-empty strings' unless
+          @key_filter.nil? || valid_key_filter?(@key_filter)
 
         errors << 'source_line_filter must be a mapping' if @source_line_filter && !@source_line_filter.is_a?(Hash)
         return if @translation_locales.is_a?(Hash) && @translation_locales.all? do |path, locale|
@@ -102,7 +104,8 @@ module I18nContextGenerator
         errors << 'llm.endpoint must not contain credentials, a query, or a fragment' if uri.userinfo || uri.query || uri.fragment
 
         loopback_hosts = %w[localhost 127.0.0.1 ::1]
-        errors << 'plain HTTP llm.endpoint is allowed only for a loopback host' if uri.scheme == 'http' && !loopback_hosts.include?(uri.host)
+        normalized_host = uri.hostname&.downcase
+        errors << 'plain HTTP llm.endpoint is allowed only for a loopback host' if uri.scheme == 'http' && !loopback_hosts.include?(normalized_host)
       rescue URI::InvalidURIError
         errors << 'llm.endpoint must be an absolute HTTP(S) URL'
       end
@@ -196,6 +199,10 @@ module I18nContextGenerator
 
       def string_array?(value)
         value.is_a?(Array) && value.all? { |item| item.is_a?(String) && !item.empty? }
+      end
+
+      def valid_key_filter?(value)
+        (value.is_a?(String) && !value.strip.empty?) || (string_array?(value) && value.any?)
       end
 
       def validate_integer(errors, name, value, minimum:)

@@ -301,20 +301,39 @@ RSpec.describe I18nContextGenerator::Config do
     it 'combines repeatable singular list flags and accepts legacy comma-separated values' do
       config = described_class.from_cli(
         translation: %w[First.strings Second.strings],
-        source: ['Sources', 'Features,Shared'],
+        source: %w[Sources Features Shared],
         key: ['settings.*', 'profile.title'],
         keys: 'legacy.one,legacy.two'
       )
 
       expect(config.translations).to eq(%w[First.strings Second.strings])
       expect(config.source_paths).to eq(%w[Sources Features Shared])
-      expect(config.key_filter).to eq('settings.*,profile.title,legacy.one,legacy.two')
+      expect(config.key_filter).to eq(%w[settings.* profile.title legacy.one legacy.two])
+    end
+
+    it 'preserves commas in singular path and key flags' do
+      Dir.mktmpdir do |dir|
+        translation = File.join(dir, 'Resources,Legacy.xcstrings')
+        source = File.join(dir, 'Sources,Legacy')
+        File.write(translation, '{}')
+        FileUtils.mkdir_p(source)
+
+        config = described_class.from_cli(
+          translation: [translation],
+          source: [source],
+          key: ['greeting,formal']
+        )
+
+        expect(config.translations).to eq([translation])
+        expect(config.source_paths).to eq([source])
+        expect(config.key_filter).to eq(['greeting,formal'])
+      end
     end
 
     it 'parses CLI options' do
       options = {
         translations: 'file1.strings,file2.strings',
-        source: './Sources,./App',
+        source: ['./Sources', './App'],
         provider: 'anthropic',
         model: 'claude-3-opus',
         discovery_mode: 'source',
@@ -350,7 +369,7 @@ RSpec.describe I18nContextGenerator::Config do
       expect(config.no_cache).to be false
       expect(config.cache_dir).to eq('tmp/context-cache')
       expect(config.dry_run).to be true
-      expect(config.key_filter).to eq('key1,key2')
+      expect(config.key_filter).to eq(%w[key1 key2])
       expect(config.write_back).to be true
       expect(config.diff_base).to eq('origin/main')
       expect(config.diff_head).to eq('feature/head')
@@ -412,7 +431,7 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(base_config.translations).to eq(%w[First.strings Second.strings])
       expect(base_config.source_paths).to eq(%w[Sources Shared])
-      expect(base_config.key_filter).to eq('settings.*,profile.title')
+      expect(base_config.key_filter).to eq(%w[settings.* profile.title])
     end
 
     it 'normalizes a dash output override to structured stdout' do
@@ -420,6 +439,15 @@ RSpec.describe I18nContextGenerator::Config do
 
       expect(base_config.output_path).to eq('-')
       expect(base_config.output_stdout).to be(true)
+    end
+
+    it 'honors an explicit false stdout override' do
+      config = described_class.new(output_stdout: true)
+
+      config.merge_cli(stdout: false)
+
+      expect(config.output_stdout).to be(false)
+      expect(config.output_path).to be_nil
     end
 
     it 'returns self for chaining' do
@@ -612,6 +640,18 @@ RSpec.describe I18nContextGenerator::Config do
       )
       expect { unsafe.validate! }
         .to raise_error(I18nContextGenerator::Error, /plain HTTP.*loopback/)
+
+      [
+        'http://[::1]:11434/v1/responses',
+        'http://LOCALHOST:11434/v1/responses'
+      ].each do |endpoint|
+        loopback = described_class.new(
+          provider: 'openai_compatible',
+          model: 'local-model',
+          endpoint: endpoint
+        )
+        expect(loopback.validate!).to be(loopback)
+      end
     end
 
     it 'rejects provider endpoints on built-in remote providers' do
@@ -735,6 +775,16 @@ RSpec.describe I18nContextGenerator::Config do
       end
     end
 
+    it 'warns and ignores unknown keys in unversioned compatibility mode' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'legacy.yml')
+        File.write(path, "prompt: Legacy prompt\nprocessing:\n  concurency: 2\n")
+
+        expect { described_class.from_file(path) }
+          .to output(/unknown top-level keys: prompt.*unknown processing keys: concurency.*unversioned config/m).to_stderr
+      end
+    end
+
     it 'rejects unsupported versions and unknown keys' do
       Dir.mktmpdir do |dir|
         future = File.join(dir, 'future.yml')
@@ -742,7 +792,7 @@ RSpec.describe I18nContextGenerator::Config do
         unknown_translation = File.join(dir, 'unknown-translation.yml')
         File.write(future, "schema_version: 2\n")
         File.write(unknown, "schema_version: 1\nprocessing:\n  concurency: 2\n")
-        File.write(unknown_translation, "translations:\n  - path: Localizable.strings\n    local: en\n")
+        File.write(unknown_translation, "schema_version: 1\ntranslations:\n  - path: Localizable.strings\n    local: en\n")
 
         expect { described_class.from_file(future) }
           .to raise_error(I18nContextGenerator::Error, /unsupported schema_version 2/)

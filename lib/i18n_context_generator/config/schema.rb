@@ -189,11 +189,13 @@ module I18nContextGenerator
       end
 
       def validate_document!(yaml, path:)
+        explicit_version = yaml.key?('schema_version')
         version = yaml.fetch('schema_version', VERSION)
         raise Error, "Invalid config #{path}: unsupported schema_version #{version.inspect}; expected #{VERSION}" unless version == VERSION
 
+        unknown_messages = []
         unknown_top_level = yaml.keys - DOCUMENT_KEYS
-        raise Error, "Invalid config #{path}: unknown top-level keys: #{unknown_top_level.join(', ')}" if unknown_top_level.any?
+        unknown_messages << "unknown top-level keys: #{unknown_top_level.join(', ')}" if unknown_top_level.any?
 
         SECTION_KEYS.each do |section, allowed_keys|
           value = yaml[section]
@@ -202,7 +204,14 @@ module I18nContextGenerator
           unknown = value.keys - allowed_keys
           next if unknown.empty?
 
-          raise Error, "Invalid config #{path}: unknown #{section} keys: #{unknown.join(', ')}"
+          unknown_messages << "unknown #{section} keys: #{unknown.join(', ')}"
+        end
+
+        if unknown_messages.any?
+          details = unknown_messages.join('; ')
+          raise Error, "Invalid config #{path}: #{details}" if explicit_version
+
+          warn "Warning: #{details} ignored in unversioned config #{path}; add schema_version: #{VERSION} to enable strict validation"
         end
 
         VERSION
