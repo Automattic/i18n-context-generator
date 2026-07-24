@@ -40,6 +40,23 @@ RSpec.describe I18nContextGenerator::LLM::Client do
     )
   end
 
+  it 'uses separate string and null branches for nullable enums' do
+    properties = described_class::RESPONSE_SCHEMA.fetch(:properties)
+
+    expect(properties.fetch(:ui_element)).to eq(
+      anyOf: [
+        { type: 'string', enum: described_class::UI_ELEMENTS },
+        { type: 'null' }
+      ]
+    )
+    expect(properties.fetch(:tone)).to eq(
+      anyOf: [
+        { type: 'string', enum: described_class::TONES },
+        { type: 'null' }
+      ]
+    )
+  end
+
   it 'redacts likely secrets and hides full file paths by default' do
     prompt = client.prompt_for(
       key: 'settings.title',

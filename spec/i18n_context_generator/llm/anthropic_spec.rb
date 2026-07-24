@@ -49,7 +49,8 @@ RSpec.describe I18nContextGenerator::LLM::Anthropic do
         expect(body[:max_tokens]).to eq(I18nContextGenerator::LLM::Client::MAX_OUTPUT_TOKENS)
         expect(body[:system]).to eq(I18nContextGenerator::LLM::Client::SYSTEM_PROMPT)
         expect(body.dig(:output_config, :format, :type)).to eq('json_schema')
-        expect(body.dig(:output_config, :format, :schema, :required)).to include('description')
+        expect(body.dig(:output_config, :format, :schema))
+          .to eq(I18nContextGenerator::LLM::Client::RESPONSE_SCHEMA)
         expect(body.dig(:messages, 0, :content)).to include('GLOSSARY.md', 'subscription surface')
         response
       end

@@ -54,7 +54,8 @@ RSpec.describe I18nContextGenerator::LLM::OpenAI do
         expect(body[:input]).to include('settings.title')
         expect(body[:input]).to include('Pull request title', 'Clarify the settings title')
         expect(body.dig(:text, :format, :type)).to eq('json_schema')
-        expect(body.dig(:text, :format, :schema, :required)).to include('description')
+        expect(body.dig(:text, :format, :schema))
+          .to eq(I18nContextGenerator::LLM::Client::RESPONSE_SCHEMA)
         response
       end
 

@@ -38,8 +38,18 @@ module I18nContextGenerator
         required: %w[description ui_element tone max_length confidence ambiguity_reason],
         properties: {
           description: { type: 'string' },
-          ui_element: { type: %w[string null], enum: UI_ELEMENTS + [nil] },
-          tone: { type: %w[string null], enum: TONES + [nil] },
+          ui_element: {
+            anyOf: [
+              { type: 'string', enum: UI_ELEMENTS },
+              { type: 'null' }
+            ]
+          },
+          tone: {
+            anyOf: [
+              { type: 'string', enum: TONES },
+              { type: 'null' }
+            ]
+          },
           max_length: { type: %w[integer null] },
           confidence: { type: 'string', enum: CONFIDENCE_LEVELS },
           ambiguity_reason: {
