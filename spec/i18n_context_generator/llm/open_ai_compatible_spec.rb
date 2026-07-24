@@ -37,6 +37,8 @@ RSpec.describe I18nContextGenerator::LLM::OpenAICompatible do
       expect(headers).to eq({})
       expect(body[:model]).to eq('local-model')
       expect(body[:input]).to include('GLOSSARY.md', 'Local product terminology')
+      expect(body.dig(:text, :format, :schema))
+        .to eq(I18nContextGenerator::LLM::Client::RESPONSE_SCHEMA)
       response
     end
 

@@ -14,7 +14,8 @@ _None_
 
 ### Bug Fixes
 
-_None_
+- Send nullable structured-output enums in a provider-compatible schema.
+- Index large Unicode Apple string catalogs with consistent byte offsets.
 
 ### Internal Changes
 
