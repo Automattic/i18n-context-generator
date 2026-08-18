@@ -14,11 +14,17 @@ _None_
 
 ### Bug Fixes
 
-- Preserve Android XML diff content whose leading plus signs resemble a file header.
+_None_
 
 ### Internal Changes
 
 _None_
+
+## 0.5.2
+
+### Bug Fixes
+
+- Preserve Android XML diff content whose leading plus signs resemble a file header.
 
 ## 0.5.1
 
