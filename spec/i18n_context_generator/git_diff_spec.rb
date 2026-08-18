@@ -146,7 +146,7 @@ RSpec.describe I18nContextGenerator::GitDiff do
                  'commit', '-q', '-m', 'Initial commit')
           system('git', 'checkout', '-q', '-b', 'feature')
 
-          File.write(path, <<~XML.chomp)
+          File.write(path, <<~XML)
             <resources>
               <string name="existing">Existing</string>
               <string name="new_key">New</string>
@@ -155,7 +155,12 @@ RSpec.describe I18nContextGenerator::GitDiff do
           system('git', 'add', path)
           system('git', '-c', 'user.name=i18n-context-generator',
                  '-c', 'user.email=i18n-context-generator@example.com',
-                 'commit', '-q', '-m', 'Add resource without trailing newline')
+                 'commit', '-q', '-m', 'Add resource and trailing newline')
+
+          diff_output, = Open3.capture3('git', 'diff', 'main...HEAD', '--', path)
+          expect(diff_output).to include(
+            "\\ No newline at end of file\n+  <string name=\"new_key\">New</string>\n"
+          )
 
           locations = described_class.new(base_ref: 'main').changed_key_locations([path])
 
