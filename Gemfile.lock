@@ -1,7 +1,7 @@
 PATH
   remote: .
   specs:
-    i18n-context-generator (0.5.1)
+    i18n-context-generator (0.5.2)
       concurrent-ruby (~> 1.2)
       csv (~> 3.3)
       dotstrings (~> 0.6)

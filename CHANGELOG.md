@@ -14,12 +14,18 @@ _None_
 
 ### Bug Fixes
 
-- Preserve Android XML diff content whose leading plus signs resemble a file header.
-- Ignore Git no-newline markers when locating changed Android XML resources.
+_None_
 
 ### Internal Changes
 
 _None_
+
+## 0.5.2
+
+### Bug Fixes
+
+- Preserve Android XML diff content whose leading plus signs resemble a file header.
+- Ignore Git no-newline markers when locating changed Android XML resources.
 
 ## 0.5.1
 
