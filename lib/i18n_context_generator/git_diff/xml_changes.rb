@@ -79,6 +79,7 @@ module I18nContextGenerator
         next if update_xml_hunk_line?(state, line)
         next if !state[:in_hunk] && line.start_with?('index ', '--- ', '+++ ')
         next unless state[:in_hunk]
+        next if line.start_with?('\\')
 
         is_removed = line.start_with?('-')
         is_added = line.start_with?('+')

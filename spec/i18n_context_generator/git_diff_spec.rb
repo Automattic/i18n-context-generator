@@ -129,6 +129,49 @@ RSpec.describe I18nContextGenerator::GitDiff do
         end
       end
     end
+
+    it 'ignores no-newline markers when locating changed Android XML keys' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          system('git', 'init', '-q', '-b', 'main')
+          path = 'strings.xml'
+          File.write(path, <<~XML.chomp)
+            <resources>
+              <string name="existing">Existing</string>
+            </resources>
+          XML
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator',
+                 '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Initial commit')
+          system('git', 'checkout', '-q', '-b', 'feature')
+
+          File.write(path, <<~XML)
+            <resources>
+              <string name="existing">Existing</string>
+              <string name="new_key">New</string>
+            </resources>
+          XML
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator',
+                 '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Add resource and trailing newline')
+
+          diff_output, = Open3.capture3('git', 'diff', 'main...HEAD', '--', path)
+          expect(diff_output).to include(
+            "\\ No newline at end of file\n+  <string name=\"new_key\">New</string>\n"
+          )
+
+          locations = described_class.new(base_ref: 'main').changed_key_locations([path])
+
+          expect(locations).to eq(
+            [path, 'new_key'] => [
+              I18nContextGenerator::ChangedLocation.new(file: path, line: 3)
+            ]
+          )
+        end
+      end
+    end
   end
 
   describe '#changed_lines' do
