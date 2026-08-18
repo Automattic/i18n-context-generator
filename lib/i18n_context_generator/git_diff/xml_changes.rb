@@ -63,14 +63,22 @@ module I18nContextGenerator
         pending_tag: nil,
         file_path: file_path,
         added_file_lines: [],
-        xml_comment_state: {}
+        xml_comment_state: {},
+        in_hunk: false
       }
     end
 
     def parse_xml_diff!(state, diff_output)
       diff_output.each_line do |line|
+        if line.start_with?('diff ')
+          state[:file_line] = nil
+          state[:in_hunk] = false
+          next
+        end
+
         next if update_xml_hunk_line?(state, line)
-        next if line.start_with?('diff ', 'index ', '--- ', '+++ ')
+        next if !state[:in_hunk] && line.start_with?('index ', '--- ', '+++ ')
+        next unless state[:in_hunk]
 
         is_removed = line.start_with?('-')
         is_added = line.start_with?('+')
@@ -103,6 +111,7 @@ module I18nContextGenerator
       state[:current_string] = nil
       state[:pending_tag] = nil
       state[:xml_comment_state] = {}
+      state[:in_hunk] = true
       true
     end
 
