@@ -89,6 +89,46 @@ RSpec.describe I18nContextGenerator::GitDiff do
         )
       end
     end
+
+    it 'keeps Android XML content that resembles a diff file header' do
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          system('git', 'init', '-q', '-b', 'main')
+          path = 'strings.xml'
+          File.write(path, <<~XML)
+            <resources>
+              <string name="math">
+              </string>
+            </resources>
+          XML
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator',
+                 '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Initial commit')
+          system('git', 'checkout', '-q', '-b', 'feature')
+
+          File.write(path, <<~XML)
+            <resources>
+              <string name="math">
+            ++ plus
+              </string>
+            </resources>
+          XML
+          system('git', 'add', path)
+          system('git', '-c', 'user.name=i18n-context-generator',
+                 '-c', 'user.email=i18n-context-generator@example.com',
+                 'commit', '-q', '-m', 'Add header-like resource content')
+
+          locations = described_class.new(base_ref: 'main').changed_key_locations([path])
+
+          expect(locations).to eq(
+            [path, 'math'] => [
+              I18nContextGenerator::ChangedLocation.new(file: path, line: 3)
+            ]
+          )
+        end
+      end
+    end
   end
 
   describe '#changed_lines' do
