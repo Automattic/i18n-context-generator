@@ -5,7 +5,7 @@ agents:
 common_params:
   - &docker_plugin "docker#v5.7.0"
   - &docker_ruby_32_image "public.ecr.aws/docker/library/ruby:3.2.2"
-  - &docker_ruby_34_image "public.ecr.aws/docker/library/ruby:3.4.9"
+  - &docker_ruby_34_image "public.ecr.aws/docker/library/ruby:3.4.13"
 
 steps:
   #################
